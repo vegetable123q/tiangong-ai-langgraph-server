@@ -31,9 +31,7 @@ class SearchInternetTool extends DynamicStructuredTool {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${
-                process.env.SUPABASE_ANON_KEY ?? ''
-              }`,
+              Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY ?? ''}`,
               email: this.email,
               password: this.password,
               'x-region': 'us-east-1',
