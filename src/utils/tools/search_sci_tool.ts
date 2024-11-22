@@ -1,30 +1,47 @@
+// Setup type definitions for built-in Supabase Runtime APIs
+import '@supabase/functions-js/edge-runtime.d.ts';
+
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 
-class SearchInternetTool extends DynamicStructuredTool {
+type FilterType = { journal: string[] } | Record<string | number | symbol, never>;
+
+class SearchSciTool extends DynamicStructuredTool {
   private email: string;
   private password: string;
 
   constructor({ email, password }: { email: string; password: string }) {
     super({
-      name: 'Search_Internet_Tool',
-      description: 'Call this tool to search internet for up-to-date information.',
+      name: 'Search_Sci_Tool',
+      description:
+        'Use this tool to perform semantic search on the academic database for precise and specialized information.',
       schema: z.object({
         query: z.string().min(1).describe('Requirements or questions from the user.'),
-        maxResults: z.number().default(5).describe('Number of results to return.'),
+        journal: z.array(z.string()).optional().describe('Journal names to filter the search.'),
+        topK: z.number().default(5).describe('Number of top chunk results to return.'),
+        extK: z
+          .number()
+          .optional()
+          .describe('Number of additional chunks to include before and after each topK result.'),
       }),
       func: async ({
         query,
-        maxResults,
+        journal,
+        topK,
       }: {
         query: string;
-        maxResults: number;
+        journal: string[];
+        topK: number;
         email: string;
         password: string;
       }) => {
-        const requestBody = JSON.stringify({ query, maxResults });
+        const filter: FilterType = journal.length > 0 ? { journal: journal } : {};
+        const isFilterEmpty = Object.keys(filter).length === 0;
+        const requestBody = JSON.stringify(
+          isFilterEmpty ? { query, topK } : { query, topK, filter },
+        );
 
-        const url = `${process.env.BASE_URL}/internet_search`;
+        const url = `${process.env.BASE_URL}/sci_search`;
 
         try {
           const response = await fetch(url, {
@@ -51,9 +68,10 @@ class SearchInternetTool extends DynamicStructuredTool {
         }
       },
     });
+
     this.email = email;
     this.password = password;
   }
 }
 
-export default SearchInternetTool;
+export default SearchSciTool;

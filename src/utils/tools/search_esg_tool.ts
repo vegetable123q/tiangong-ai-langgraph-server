@@ -28,7 +28,7 @@ class SearchEsgTool extends DynamicStructuredTool {
           isFilterEmpty ? { query, topK } : { query, topK, filter },
         );
 
-        const url = 'https://qyyqlnwqwgvzxnccnbgm.supabase.co/functions/v1/esg_search';
+        const url = `${process.env.BASE_URL}/esg_search`;
         try {
           const response = await fetch(url, {
             method: 'POST',
@@ -37,7 +37,7 @@ class SearchEsgTool extends DynamicStructuredTool {
               Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY ?? ''}`,
               email: this.email,
               password: this.password,
-              'x-region': 'us-east-1',
+              'x-region': process.env.X_REGION ?? '',
             },
             body: requestBody,
           });

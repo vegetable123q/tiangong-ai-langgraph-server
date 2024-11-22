@@ -1,30 +1,30 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 
-class SearchInternetTool extends DynamicStructuredTool {
+type FilterType = { course: string[] } | Record<string | number | symbol, never>;
+
+class SearchEduTool extends DynamicStructuredTool {
   private email: string;
   private password: string;
 
   constructor({ email, password }: { email: string; password: string }) {
     super({
-      name: 'Search_Internet_Tool',
-      description: 'Call this tool to search internet for up-to-date information.',
+      name: 'Search_Edu_Tool',
+      description:
+        'Use this tool to search the environmental educational materials database for information.',
       schema: z.object({
         query: z.string().min(1).describe('Requirements or questions from the user.'),
-        maxResults: z.number().default(5).describe('Number of results to return.'),
+        course: z.array(z.string()).default([]).describe('Course name to filter the search.'),
+        topK: z.number().default(5).describe('Number of top chunk results to return.'),
       }),
-      func: async ({
-        query,
-        maxResults,
-      }: {
-        query: string;
-        maxResults: number;
-        email: string;
-        password: string;
-      }) => {
-        const requestBody = JSON.stringify({ query, maxResults });
+      func: async ({ query, course, topK }: { query: string; course: string[]; topK: number }) => {
+        const filter: FilterType = course.length > 0 ? { course: course } : {};
+        const isFilterEmpty = Object.keys(filter).length === 0;
+        const requestBody = JSON.stringify(
+          isFilterEmpty ? { query, topK } : { query, topK, filter },
+        );
 
-        const url = `${process.env.BASE_URL}/internet_search`;
+        const url = `${process.env.BASE_URL}/edu_search`;
 
         try {
           const response = await fetch(url, {
@@ -56,4 +56,4 @@ class SearchInternetTool extends DynamicStructuredTool {
   }
 }
 
-export default SearchInternetTool;
+export default SearchEduTool;

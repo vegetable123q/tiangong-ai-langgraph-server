@@ -37,7 +37,7 @@ class SearchInternalTool extends DynamicStructuredTool {
         const requestBody = JSON.stringify({ query, filter, topK });
         // console.log('Request body:', requestBody);
 
-        const url = 'https://qyyqlnwqwgvzxnccnbgm.supabase.co/functions/v1/internal_search';
+        const url = `${process.env.BASE_URL}/internal_search`;
 
         try {
           const response = await fetch(url, {
@@ -47,7 +47,7 @@ class SearchInternalTool extends DynamicStructuredTool {
               Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY ?? ''}`,
               email: this.email,
               password: this.password,
-              'x-region': 'us-east-1',
+              'x-region': process.env.X_REGION ?? '',
             },
             body: requestBody,
           });
