@@ -17,7 +17,7 @@ npm install
 ```bash
 
 # Windows & Linux
-pip install -U langgraph-cli
+pip install -U --break-system-packages langgraph-cli 
 
 # Mac Only
 brew install langgraph-cli
