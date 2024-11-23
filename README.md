@@ -10,6 +10,8 @@ nvm alias default 20
 nvm use
 
 npm install
+# Update npm packages
+npm update
 ```
 
 ## Start server
