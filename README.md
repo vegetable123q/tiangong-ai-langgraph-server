@@ -19,7 +19,7 @@ npm update
 ```bash
 
 # Windows & Linux
-pip install -U --break-system-packages langgraph-cli 
+pip install -U --break-system-packages langgraph-cli
 
 # Mac Only
 brew install langgraph-cli

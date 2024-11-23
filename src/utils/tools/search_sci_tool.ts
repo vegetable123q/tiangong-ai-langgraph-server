@@ -1,6 +1,3 @@
-// Setup type definitions for built-in Supabase Runtime APIs
-import '@supabase/functions-js/edge-runtime.d.ts';
-
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 
