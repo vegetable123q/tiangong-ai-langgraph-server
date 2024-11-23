@@ -1,0 +1,10 @@
+### Get assistant
+curl --request GET \
+  --url {{$dotenv RAG_ASSISTANT_URL }}\
+  --header 'X-Api-Key: {{$dotenv LANGSMITH_API_KEY}}'
+
+### Get assistant graph
+curl --request GET \
+  --url {{$dotenv RAG_ASSISTANT_URL }}/graph \
+  --header 'X-Api-Key: {{$dotenv LANGSMITH_API_KEY}}'
+
