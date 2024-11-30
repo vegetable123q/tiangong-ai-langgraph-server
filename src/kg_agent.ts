@@ -49,7 +49,6 @@ const responseSchema = z
   .describe('A tree-shape knowledge framework.');
 
 async function generateKG(state: typeof MessagesAnnotation.State) {
-
   const messages = state.messages;
   const lastMessage: AIMessage = messages[messages.length - 1];
   const { context, topic, textbook } = JSON.parse(lastMessage.content as string);
