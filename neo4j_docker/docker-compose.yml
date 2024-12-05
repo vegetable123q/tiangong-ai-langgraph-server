@@ -1,0 +1,76 @@
+version: '3'
+
+services:
+
+  neo4j:
+      image: neo4j:5.25.1-enterprise
+      restart: always
+      container_name: neo4j
+      volumes:
+        - ./neo4j/conf:/var/lib/neo4j/conf
+        - ./neo4j/import:/import
+        - ./neo4j/plugins:/plugins
+      ports:
+        - 7474:7474
+        - 7687:7687
+      ulimits:
+        nproc: 65535
+        nofile:
+          soft: 65535
+          hard: 65535
+      environment:
+        - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+        - NEO4J_dbms.security.allow_csv_import_from_file_urls=true
+        - NEO4J_dbms.directories.import=/import
+        - NEO4J_AUTH=neo4j/neo4j
+
+  elastic:
+      image: docker.elastic.co/elasticsearch/elasticsearch:7.17.25
+      restart: always
+      container_name: es
+      volumes:
+        - ./es/plugins:/usr/share/elasticsearch/plugins
+        - ./es/config/analysis/synonym.dic:/usr/share/elasticsearch/config/analysis/synonym.dic
+      expose:
+        - "9200"
+        - "9300"
+      ulimits:
+        nproc: 65535
+        nofile:
+          soft: 65535
+          hard: 65535
+      environment:
+        - discovery.type=single-node
+
+  kibana:
+      image: docker.elastic.co/kibana/kibana:7.17.25
+      restart: always
+      container_name: kibana
+      ports:
+        - 5601:5601
+      environment:
+        - ELASTICSEARCH_HOSTS=http://es:9200
+
+  neodash-dev:
+      image: nielsdejong/neodash:latest
+      restart: always
+      container_name: neodash-dev
+      ports:
+        - 5004:5005
+
+  neodash:
+      image: nielsdejong/neodash:latest
+      restart: always
+      container_name: neodash
+      ports:
+        - 5005:5005
+      environment:
+        # - ssoEnabled=false
+        # - ssoDiscoveryUrl=https://example.com
+        - standalone=true
+        - standaloneProtocol=neo4j
+        - standaloneHost=localhost
+        - standalonePort=7687
+        - standaloneDatabase=neo4j
+        - standaloneDashboardName=Schneider Electric Regulatory Knowledge Graph
+        - standaloneDashboardDatabase=dashboards
