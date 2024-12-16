@@ -24,6 +24,12 @@ const url = process.env.NEO4J_URI ?? '';
 const username = process.env.NEO4J_USER ?? '';
 const password = process.env.NEO4J_PASSWORD ?? '';
 
+// Supabase
+const base_url = process.env.BASE_URL ?? '';
+const supabase_email = process.env.EMAIL ?? '';
+const supabase_password = process.env.PASSWORD ?? '';
+const supabase_authorization = process.env.SUPABASE_ANON_KEY ?? '';
+
 type queryElement = {
   rec_id: string;
   textbook: string;
@@ -63,11 +69,11 @@ async function getChapters(state: queryElement) {
 
   const query = '章节、目录、第 章、内容包含、章节设计';
 
-  const url = process.env.URL_TEXTBOOK_SEARCH as string;
+  const url = `${base_url}/textbook_search`;
   const headers = {
-    email: process.env.EMAIL,
-    password: process.env.PASSWORD,
-    Authorization: `Bearer ${process.env.TOKEN}`,
+    email: supabase_email,
+    password: supabase_password,
+    Authorization: `Bearer ${supabase_authorization}`,
     'Content-Type': 'application/json',
   };
 
@@ -165,12 +171,12 @@ async function routeChapters(state: typeof chainState.State): Promise<Send[]> {
 async function getContents(state: queryElement): Promise<Partial<typeof chainState.State>> {
   console.log('---    PROCESS: GET CONTENTS    ---');
 
-  const url = process.env.URL_TEXTBOOK_SEARCH as string;
+  const url = `${base_url}/textbook_search`;
 
   const headers = {
-    email: process.env.EMAIL,
-    password: process.env.PASSWORD,
-    Authorization: `Bearer ${process.env.TOKEN}`,
+    email: supabase_email,
+    password: supabase_password,
+    Authorization: `Bearer ${supabase_authorization}`,
     'Content-Type': 'application/json',
   };
 

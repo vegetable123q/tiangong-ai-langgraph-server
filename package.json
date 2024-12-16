@@ -4,20 +4,20 @@
     "lint": "prettier -c --write \"**/**.{js,jsx,tsx,ts,less,md,json}\""
   },
   "dependencies": {
-    "@langchain/community": "^0.3.16",
-    "@langchain/core": "^0.3.19",
-    "@langchain/langgraph": "^0.2.23",
+    "@langchain/community": "^0.3.19",
+    "@langchain/core": "^0.3.23",
+    "@langchain/langgraph": "^0.2.33",
     "@langchain/openai": "^0.3.14",
-    "axios":"^1.7.9",
-    "langsmith": "^0.2.8",
+    "axios": "^1.7.9",
+    "langsmith": "^0.2.13",
     "neo4j-driver": "^5.27.0",
     "pyodide": "^0.26.4",
-    "zod": "^3.23.8",
-    "zod-to-json-schema": "^3.23.5"
+    "zod": "^3.24.1",
+    "zod-to-json-schema": "^3.24.1"
   },
   "devDependencies": {
     "@tsconfig/recommended": "^1.0.8",
-    "prettier": "^3.4.1",
+    "prettier": "^3.4.2",
     "prettier-plugin-organize-imports": "^4.1.0",
     "typescript": "^5.7.2"
   }
