@@ -215,7 +215,7 @@ async function supplementContents(state: typeof StateAnnotation.State) {
   // const chain = prompt.pipe(model);
   const response = await prompt.pipe(model).invoke({ context: query, suggestion: suggestion });
 
-  console.log(response);
+  // console.log(response);
 
   return {
     contents: [response],
