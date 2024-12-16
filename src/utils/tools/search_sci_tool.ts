@@ -1,7 +1,6 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-
-type FilterType = { journal: string[] } | Record<string | number | symbol, never>;
+import cleanObject from './_shared/clean_object';
 
 class SearchSciTool extends DynamicStructuredTool {
   private email: string;
@@ -10,64 +9,95 @@ class SearchSciTool extends DynamicStructuredTool {
   constructor({ email, password }: { email: string; password: string }) {
     super({
       name: 'Search_Sci_Tool',
-      description:
-        'Use this tool to perform semantic search on the academic database for precise and specialized information.',
+      description: 'Perform search on academic database for precise and specialized information.',
       schema: z.object({
         query: z.string().min(1).describe('Requirements or questions from the user.'),
-        journal: z.array(z.string()).optional().describe('Journal names to filter the search.'),
         topK: z.number().default(5).describe('Number of top chunk results to return.'),
         extK: z
           .number()
-          .optional()
+          .default(0)
           .describe('Number of additional chunks to include before and after each topK result.'),
+        filter: z
+          .object({
+            journal: z.array(z.string()).optional().describe('Filter by journal.'),
+          })
+          .optional()
+          .describe(
+            'DO NOT USE IT IF NOT EXPLICIT REQUESTED IN THE QUERY. Optional filter conditions for specific fields, as an object with optional arrays of values.',
+          ),
+        dateFilter: z
+          .object({
+            date: z
+              .object({
+                gte: z.number().optional(),
+                lte: z.number().optional(),
+              })
+              .optional(),
+          })
+          .optional()
+          .describe(
+            'DO NOT USE IT IF NOT EXPLICIT REQUESTED IN THE QUERY. Optional filter conditions for date ranges in UNIX timestamps.',
+          ),
       }),
-      func: async ({
-        query,
-        journal,
-        topK,
-      }: {
-        query: string;
-        journal: string[];
-        topK: number;
-        email: string;
-        password: string;
-      }) => {
-        const filter: FilterType = journal.length > 0 ? { journal: journal } : {};
-        const isFilterEmpty = Object.keys(filter).length === 0;
-        const requestBody = JSON.stringify(
-          isFilterEmpty ? { query, topK } : { query, topK, filter },
-        );
-
-        const url = `${process.env.BASE_URL}/sci_search`;
-
-        try {
-          const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY ?? ''}`,
-              email: this.email,
-              password: this.password,
-              'x-region': process.env.X_REGION ?? '',
-            },
-            body: requestBody,
-          });
-
-          if (!response.ok) {
-            throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
-          }
-
-          const data = await response.json();
-          return JSON.stringify(data);
-        } catch (error) {
-          console.error('Error making the request:', error);
-          throw error;
-        }
+      func: async (args) => {
+        return this.searchSci(args);
       },
     });
 
     this.email = email;
     this.password = password;
+  }
+
+  private async searchSci({
+    query,
+    topK,
+    extK,
+    filter,
+    dateFilter,
+  }: {
+    query: string;
+    topK: number;
+    extK: number;
+    filter?: {
+      journal?: string[];
+    };
+    dateFilter?: {
+      date?: {
+        gte?: number;
+        lte?: number;
+      };
+    };
+  }): Promise<string> {
+    const url = `${process.env.BASE_URL}/sci_search`;
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY ?? ''}`,
+          email: this.email,
+          password: this.password,
+          'x-region': process.env.X_REGION ?? '',
+        },
+        body: JSON.stringify(
+          cleanObject({
+            query,
+            topK,
+            extK,
+            filter,
+            dateFilter,
+          }),
+        ),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
+      }
+      const data = await response.json();
+      return JSON.stringify(data);
+    } catch (error) {
+      console.error('Error making the request:', error);
+      throw error;
+    }
   }
 }
 
