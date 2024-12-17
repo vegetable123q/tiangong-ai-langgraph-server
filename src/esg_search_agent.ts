@@ -7,12 +7,12 @@ import { MessagesAnnotation, StateGraph } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { z } from 'zod';
 
-const tools = [new TavilySearchResults({ maxResults: 3 })];
+const tools = [new TavilySearchResults({ maxResults: 5 })];
 
 // Define the function that calls the model
 async function callModel(state: typeof MessagesAnnotation.State) {
   const model = new ChatOpenAI({
-    model: 'gpt-4o',
+    model: 'gpt-4o-mini',
   }).bindTools(tools);
 
   const response = await model.invoke([
@@ -41,7 +41,7 @@ function routeModelOutput(state: typeof MessagesAnnotation.State) {
 
 async function outputModel(state: typeof MessagesAnnotation.State) {
   const model = new ChatOpenAI({
-    model: 'gpt-4o',
+    model: 'gpt-4o-mini',
   });
 
   const ResponseFormatter = z.object({
