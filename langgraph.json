@@ -7,7 +7,8 @@
     "rag_agent": "./src/rag_agent.ts:graph",
     "kg_agent": "./src/kg_agent.ts:graph",
     "esg_agent": "./src/esg_agent.ts:graph",
-    "kg_textbook_agent": "./src/kg_textbook_agent.ts:graph"
+    "kg_textbook_agent": "./src/kg_textbook_agent.ts:graph",
+    "esg_search_agent": "./src/esg_search_agent.ts:graph"
   },
   "env": ".env"
 }

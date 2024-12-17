@@ -1,7 +1,7 @@
-import { AIMessage, BaseMessage, isToolMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, BaseMessage } from '@langchain/core/messages';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { RunnableToolLike } from '@langchain/core/runnables';
-import { StructuredToolInterface, Tool } from '@langchain/core/tools';
+import { StructuredToolInterface } from '@langchain/core/tools';
 import { Annotation, StateGraph } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { ChatOpenAI } from '@langchain/openai';
@@ -97,7 +97,6 @@ async function gradeContents(
 
   const { messages } = state;
 
-
   const tool = {
     name: 'evaluate_contents_relevance',
     description:
@@ -140,18 +139,16 @@ async function gradeContents(
 
   const retrievedContents: string[] = [];
 
-  messages.forEach(
-    (item: BaseMessage) => {
-      const data_j = JSON.stringify(item);
-      const data = JSON.parse(data_j);
-      if (data['type'] === 'constructor') {
-        const id = data['id'] as string[];
-        if (id[id.length-1] === 'ToolMessage'){
-          retrievedContents.push(data['kwargs']['content'] as string);
-        }
+  messages.forEach((item: BaseMessage) => {
+    const data_j = JSON.stringify(item);
+    const data = JSON.parse(data_j);
+    if (data['type'] === 'constructor') {
+      const id = data['id'] as string[];
+      if (id[id.length - 1] === 'ToolMessage') {
+        retrievedContents.push(data['kwargs']['content'] as string);
       }
     }
-  );
+  });
 
   const score = (await chain.invoke({
     query: messages[0].content as string,
@@ -328,7 +325,7 @@ async function suggestion(
 
 function checkWellWritten(state: typeof StateAnnotation.State) {
   console.log('---  PROCESS: CHECK WELL-WRITTEN  ---');
-  const { messages,contents } = state;
+  const { messages, contents } = state;
   const lastMessage = messages[messages.length - 1] as AIMessage;
   const toolCalls = lastMessage.tool_calls;
 
@@ -385,7 +382,7 @@ async function regenerate(
   });
 
   return {
-    messages: [response]
+    messages: [response],
   };
 }
 
