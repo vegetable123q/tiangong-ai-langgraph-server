@@ -3,17 +3,32 @@ import type { AIMessage } from '@langchain/core/messages';
 import { AIMessageChunk } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 
-import { MessagesAnnotation, StateGraph } from '@langchain/langgraph';
+import { MessagesAnnotation, StateGraph, Annotation } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { z } from 'zod';
+import SearchInternetTool from 'utils/tools/search_internet_tool';
 
-const tools = [new TavilySearchResults({ maxResults: 5 })];
+
+const InternalStateAnnotation = MessagesAnnotation;
+const OutputStateAnnotation = Annotation.Root({
+  last_content: Annotation<string>(),
+});
+
+// const tools = [new TavilySearchResults({ maxResults: 5 })];
+
+const email = process.env.EMAIL ?? '';
+const password = process.env.PASSWORD ?? '';
+const tools = [
+  new SearchInternetTool({ email, password }),
+];
 
 // Define the function that calls the model
-async function callModel(state: typeof MessagesAnnotation.State) {
+async function callModel(state: typeof InternalStateAnnotation.State) {
   const model = new ChatOpenAI({
     model: 'gpt-4o-mini',
   }).bindTools(tools);
+
+  // console.log(state.messages);
 
   const response = await model.invoke([
     {
@@ -28,7 +43,7 @@ async function callModel(state: typeof MessagesAnnotation.State) {
 }
 
 // Define the function that determines whether to continue or not
-function routeModelOutput(state: typeof MessagesAnnotation.State) {
+function routeModelOutput(state: typeof InternalStateAnnotation.State) {
   const messages = state.messages;
   const lastMessage: AIMessage = messages[messages.length - 1];
   // If the LLM is invoking tools, route there.
@@ -39,7 +54,7 @@ function routeModelOutput(state: typeof MessagesAnnotation.State) {
   return 'outputModel';
 }
 
-async function outputModel(state: typeof MessagesAnnotation.State) {
+async function outputModel(state: typeof InternalStateAnnotation.State) {
   const model = new ChatOpenAI({
     model: 'gpt-4o-mini',
   });
@@ -51,6 +66,7 @@ async function outputModel(state: typeof MessagesAnnotation.State) {
   const modelWithStructuredOutput = model.withStructuredOutput(ResponseFormatter);
 
   const lastRelevantMessage = state.messages.slice(-1);
+  // console.log(lastRelevantMessage);
 
   const response = await modelWithStructuredOutput.invoke([
     {
@@ -60,15 +76,25 @@ async function outputModel(state: typeof MessagesAnnotation.State) {
     ...lastRelevantMessage,
   ]);
 
-  const messages = new AIMessageChunk(JSON.stringify(response));
-  // MessagesAnnotation supports returning a single message or array of messages
-  return { messages: messages };
+  const lastContent = JSON.stringify(response);
+
+  // console.log(lastContent); 
+
+  return { last_content: lastContent };
+
+  // const messages = new AIMessageChunk(JSON.stringify(response));
+  // // MessagesAnnotation supports returning a single message or array of messages
+  // return { messages: messages };
 }
 
 // Define a new graph.
 // See https://langchain-ai.github.io/langgraphjs/how-tos/define-state/#getting-started for
 // more on defining custom graph states.
-const workflow = new StateGraph(MessagesAnnotation)
+const workflow = new StateGraph({
+  input: InternalStateAnnotation,
+  output: OutputStateAnnotation,
+  stateSchema: InternalStateAnnotation,
+})
   // Define the two nodes we will cycle between
   .addNode('callModel', callModel)
   .addNode('tools', new ToolNode(tools))
