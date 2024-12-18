@@ -11,7 +11,7 @@ import SearchInternetTool from 'utils/tools/search_internet_tool';
 
 const InternalStateAnnotation = MessagesAnnotation;
 const OutputStateAnnotation = Annotation.Root({
-  last_content: Annotation<string>(),
+  last_content: Annotation<string[]>(),
 });
 
 // const tools = [new TavilySearchResults({ maxResults: 5 })];
@@ -76,41 +76,26 @@ async function outputModel(state: typeof InternalStateAnnotation.State) {
     ...lastRelevantMessage,
   ]);
 
-  const lastContent = JSON.stringify(response);
-
-  // console.log(lastContent); 
-
-  return { last_content: lastContent };
+  return { last_content: response.urls };
 
   // const messages = new AIMessageChunk(JSON.stringify(response));
   // // MessagesAnnotation supports returning a single message or array of messages
   // return { messages: messages };
 }
 
-// Define a new graph.
-// See https://langchain-ai.github.io/langgraphjs/how-tos/define-state/#getting-started for
-// more on defining custom graph states.
+
 const workflow = new StateGraph({
   input: InternalStateAnnotation,
   output: OutputStateAnnotation,
   stateSchema: InternalStateAnnotation,
 })
-  // Define the two nodes we will cycle between
   .addNode('callModel', callModel)
   .addNode('tools', new ToolNode(tools))
   .addNode('outputModel', outputModel)
-  // Set the entrypoint as `callModel`
-  // This means that this node is the first one called
   .addEdge('__start__', 'callModel')
   .addConditionalEdges(
-    // First, we define the edges' source node. We use `callModel`.
-    // This means these are the edges taken after the `callModel` node is called.
     'callModel',
-    // Next, we pass in the function that will determine the sink node(s), which
-    // will be called after the source node is called.
     routeModelOutput,
-    // List of the possible destinations the conditional edge can route to.
-    // Required for conditional edges to properly render the graph in Studio
     ['tools', 'outputModel'],
   )
   .addEdge('tools', 'callModel')
