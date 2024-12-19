@@ -14,13 +14,13 @@ const OutputStateAnnotation = Annotation.Root({
   last_content: Annotation<string[]>(),
 });
 
-// const tools = [new TavilySearchResults({ maxResults: 5 })];
+const tools = [new TavilySearchResults({ maxResults: 5 })];
 
-const email = process.env.EMAIL ?? '';
-const password = process.env.PASSWORD ?? '';
-const tools = [
-  new SearchInternetTool({ email, password }),
-];
+// const email = process.env.EMAIL ?? '';
+// const password = process.env.PASSWORD ?? '';
+// const tools = [
+//   new SearchInternetTool({ email, password }),
+// ];
 
 // Define the function that calls the model
 async function callModel(state: typeof InternalStateAnnotation.State) {
@@ -47,7 +47,7 @@ function routeModelOutput(state: typeof InternalStateAnnotation.State) {
   const messages = state.messages;
   const lastMessage: AIMessage = messages[messages.length - 1];
   // If the LLM is invoking tools, route there.
-  if ((lastMessage?.tool_calls?.length ?? 0) > 0) {
+  if ((lastMessage?.tool_calls?.length ?? 0) > 0 && messages.length < 10) {
     return 'tools';
   }
   // Otherwise to the outputModel.
