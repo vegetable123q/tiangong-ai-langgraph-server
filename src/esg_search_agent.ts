@@ -47,7 +47,7 @@ function routeModelOutput(state: typeof InternalStateAnnotation.State) {
   const messages = state.messages;
   const lastMessage: AIMessage = messages[messages.length - 1];
   // If the LLM is invoking tools, route there.
-  if ((lastMessage?.tool_calls?.length ?? 0) > 0 && messages.length < 10) {
+  if ((lastMessage?.tool_calls?.length ?? 0) > 0) {
     return 'tools';
   }
   // Otherwise to the outputModel.
