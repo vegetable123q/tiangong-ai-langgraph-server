@@ -18,7 +18,7 @@ npm update
 
 ```bash
 
-# Windows & Linuxtmux attach -t my_session
+# Windows & Linux
 sudo pip install -U --break-system-packages langgraph-cli
 
 # Mac Only
