@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@tsconfig/recommended": "^1.0.8",
+    "dotenv": "^16.4.7",
     "prettier": "^3.4.2",
     "prettier-plugin-organize-imports": "^4.1.0",
     "typescript": "^5.7.2"

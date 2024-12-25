@@ -19,10 +19,17 @@ npm update
 ```bash
 
 # Windows & Linux
-pip install -U --break-system-packages langgraph-cli
+sudo pip install -U --break-system-packages langgraph-cli
 
 # Mac Only
 brew install langgraph-cli
 
-langgraph up
+sudo langgraph up
+```
+
+```bash
+nohup node dist/multi_agents/kg_textbooks.js > kg_textbook.log 2>&1 &
+tmux new -d -s neo4j_import 'node dist/multi_agents/kg_textbooks.js > kg_textbook.log 2>&1'
+tmux kill-session -t neo4j_import
+``
 ```
