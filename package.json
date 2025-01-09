@@ -4,12 +4,12 @@
     "lint": "prettier -c --write \"**/**.{js,jsx,tsx,ts,less,md,json}\""
   },
   "dependencies": {
-    "@langchain/community": "^0.3.19",
-    "@langchain/core": "^0.3.23",
-    "@langchain/langgraph": "^0.2.33",
-    "@langchain/openai": "^0.3.14",
+    "@langchain/community": "^0.3.23",
+    "@langchain/core": "^0.3.27",
+    "@langchain/langgraph": "^0.2.39",
+    "@langchain/openai": "^0.3.16",
     "axios": "^1.7.9",
-    "langsmith": "^0.2.13",
+    "langsmith": "^0.2.15",
     "neo4j-driver": "^5.27.0",
     "pyodide": "^0.26.4",
     "zod": "^3.24.1",
