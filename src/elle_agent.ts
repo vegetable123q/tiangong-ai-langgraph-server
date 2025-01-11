@@ -8,8 +8,12 @@ import { ToolNode } from '@langchain/langgraph/prebuilt';
 import SearchEduTool from 'utils/tools/search_edu_tool';
 import SearchEsgTool from 'utils/tools/search_esg_tool';
 import SearchSciTool from 'utils/tools/search_sci_tool';
-import { z } from 'zod';
 import SearchStandardTool from './utils/tools/search_standard_tool';
+
+import { PythonInterpreterTool } from '@langchain/community/experimental/tools/pyinterpreter';
+import pyodideModule from 'pyodide';
+
+import { z } from 'zod';
 
 const email = process.env.EMAIL ?? '';
 const password = process.env.PASSWORD ?? '';
@@ -18,13 +22,48 @@ const openai_api_key = process.env.OPENAI_API_KEY ?? '';
 // const openai_chat_model = process.env.OPENAI_CHAT_MODEL ?? '';
 // const openai_chat_model = 'o1-preview-2024-09-12';
 
-const tools = [
-  new SearchEduTool({ email, password }),
-  // new TavilySearchResults({ maxResults: 5 }),
-  new SearchEsgTool({ email, password }),
-  new SearchSciTool({ email, password }),
-  new SearchStandardTool({ email, password }),
-];
+async function createPythonTool() {
+  const pyodide = await pyodideModule.loadPyodide();
+  if (!pyodide) {
+    console.error('Failed to load Pyodide');
+  } else {
+    console.log('Pyodide loaded successfully');
+  }
+  await pyodide.loadPackage(['numpy', 'pandas', 'scipy', 'sympy']);
+  const pythonTool = new PythonInterpreterTool({ instance: pyodide });
+  pythonTool.description =
+    'Executes Python code in a sandboxed environment and print the execution results. The environment resets after each execution. The tool captures both standard output (stdout) and error output (stderr) and returns them, ensuring any generated output or errors are available for further analysis.';
+  pyodide.globals.set('console', {
+    log: (msg: string) => {
+      console.log('Python Output:', msg);
+    },
+    error: (msg: string) => {
+      console.error('Python Error:', msg);
+    },
+  });
+  return pythonTool;
+}
+
+async function loadAllTools() {
+  const baseTools = [
+    new SearchEduTool({ email, password }),
+    new TavilySearchResults({ maxResults: 5 }),
+    new SearchEsgTool({ email, password }),
+    new SearchSciTool({ email, password }),
+    new SearchStandardTool({ email, password }),
+  ];
+  const pythonTool = await createPythonTool();
+  return [...baseTools, pythonTool];
+}
+
+async function buildToolNode() {
+  const toolsPromise = await loadAllTools();
+  const toolNode = new ToolNode(toolsPromise);
+  return toolNode;
+}
+
+const toolsPromise = loadAllTools();
+// const tools = [getWeather];
 
 const StateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -39,25 +78,29 @@ const StateAnnotation = Annotation.Root({
 
 async function callModel(state: typeof StateAnnotation.State) {
   console.log('---- callModel ----');
+
+  const loadedTools = await toolsPromise;
   const model = new ChatOpenAI({
     apiKey: openai_api_key,
-    modelName: 'gpt-4o-2024-11-20',
+    modelName: 'o1-2024-12-17',
     streamUsage: false,
     streaming: false,
-  }).bindTools(tools);
+  }).bindTools(loadedTools);
 
   const response = await model.invoke([
     {
       role: 'human',
-      content: `You are an expert in the field of environmental science. Your task is to solve the given problem and provide a detailed, well-structured answer.
-      Please adhere to the following guidelines:
-      - Analyze and Decompose the Problem: Carefully read and comprehend the problem statement. Break down the problem into its core components, identifying the key aspects that require information retrieval.
-      - Retrieve Supportive Information: Utilize available search tools to gather the latest and most authoritative information relevant to the problem. Ensure the relevance and reliability of the information, disregarding any data that is irrelevant or comes from dubious sources.
-      - Evaluate and Integrate Information: Assess the validity and credibility of the retrieved information. Integrate the pertinent information to form a comprehensive understanding of the problem.
-      - Construct the Solution: Based on the integrated information, develop a logically coherent and evidence-based solution. Ensure that your answer aligns with the provided evidence and addresses all key aspects of the problem. 
-      - Review and Refine: After drafting your response, review it for logical consistency, clarity, and completeness. Make necessary revisions to ensure the answer is comprehensive and easy to understand.
-        ${state.suggestion !== '' ? '- Suggestions: ' + state.suggestion : ''}
-        `,
+      content: `You are an expert in environmental science, tasked with solving the given problem. Please Analyze the problem and provide a detailed solution based on the information provided. Ensure your response is accurate, logical, and well-structured. Here are some guidelines:
+
+      1. **Analyze and Decompose the Problem**: Read the problem statement carefully. Identify the key components that need further investigation or data retrieval.
+      2. **Retrieve Relevant Information**: Use the available search tools to gather the latest and most authoritative information. Ensure all information is relevant, credible, and trustworthy.
+      3. **Evaluate and Synthesize the Information**: Assess the validity of the retrieved information, and integrate the most pertinent data to form a well-rounded understanding of the problem.
+      4. **Formulate the Solution**: Based on the synthesized information, develop a clear, logical, and evidence-based solution. Ensure your answer directly addresses the problem's core aspects.
+      5. **Review and Refine**: After drafting the solution, review it for accuracy, coherence, and clarity. Make necessary revisions to improve the logical flow and ensure completeness.
+      6. **Especially for calculation questions**: Invoke the appropriate tools (e.g., Python) to run the necessary code and ensure any Python code executed print the outputs, if the problem requires computation or specific code execution. Be sure to analyze the Python execution result (e.g., exact values) with supportive materials and integrate it into your final answer. Do not make any assumptions and do not infer parameter values.  
+      ***Important:*** DO NOT TRUMP UP! 
+
+      ${state.suggestion !== '' ? `- Suggestions: ${state.suggestion}` : ''}`,
     },
     ...state.messages,
   ]);
@@ -82,7 +125,7 @@ function routeModelOutput(state: typeof StateAnnotation.State) {
 
 const subgraphBuilder = new StateGraph(StateAnnotation)
   .addNode('callModel', callModel)
-  .addNode('tools', new ToolNode(tools))
+  .addNode('tools', buildToolNode)
   .addEdge('__start__', 'callModel')
   .addConditionalEdges('callModel', routeModelOutput, ['tools', '__end__'])
   .addEdge('tools', 'callModel');
@@ -104,6 +147,7 @@ async function getAnswer(state: typeof StateAnnotation.State) {
 
 async function evaluateAnswer(state: typeof StateAnnotation.State) {
   console.log('--- evaluateOutput ---');
+  // console.log(state.messages);
   const firstMessage: AIMessage = state.messages[0];
   const answer: string = state.answers[state.answers.length - 1];
   console.log('---- answer ----');
@@ -113,7 +157,7 @@ async function evaluateAnswer(state: typeof StateAnnotation.State) {
     score: z
       .number()
       .describe(
-        'This score ranging from 0 to 100 indicates how well the response meets the evaluate criteria, with 100 being the perfect answer while 0 being the worst.',
+        'This score ranging from 0 to 30 indicates how well the response meets the evaluate criteria, with 30 being the perfect answer while 0 being the worst.',
       ),
     suggestion: z
       .string()
@@ -122,26 +166,30 @@ async function evaluateAnswer(state: typeof StateAnnotation.State) {
   });
 
   const evaluationCriteria = `
-    1. Accuracy (totally 50 points):
-      - Full Marks (50): The answer directly addresses all parts of the question, providing all relevant details and demonstrating a thorough understanding of the topic.
-      - Partial Marks (30-49): The answer addresses most parts of the question but may have minor inaccuracies or omissions in details.
-      - Minimal Marks (10-29): The answer addresses the question but with significant gaps in understanding or important inaccuracies.
-      - No Marks (0-9): The answer does not address the question, or the response is fundamentally incorrect.
-    2. Clarity (totally 20 points):
-      - Full Marks (20): The answer is well-organized, logically structured, and easy to follow. Ideas are communicated clearly, and there is no ambiguity.
-      - Partial Marks (10-19): The answer is generally clear, but some parts may be awkwardly worded, leading to minor confusion.
-      - Minimal Marks (1-9): The response is difficult to follow due to poor organization or unclear explanations.
-      - No Marks (0): The response is so unclear that it is almost impossible to understand the main point.
-    3. Depth (totally 20 points):
-      - Full Marks (20): The answer demonstrates critical thinking, offering a well-rounded perspective with insightful analysis and examples.
-      - Partial Marks (10-19): The response provides some depth, but lacks comprehensive analysis or leaves some parts underexplored.
-      - Minimal Marks (1-9): The response is shallow, merely repeating basic facts without any meaningful analysis or insights.
-      - No Marks (0): The answer lacks depth and does not provide any substantial reasoning or exploration of the topic.
-    4. Grammar and Style (totally 10 points):
-      - Full Marks (10): The response is grammatically correct, free of spelling errors, and uses professional, formal language. The tone is appropriate for the context.
-      - Partial Marks (5-9): The response has a few grammatical errors or awkward phrasing, but it doesn’t detract significantly from the overall understanding.
-      - Minimal Marks (1-4): Frequent grammatical errors or poor style significantly hinder understanding, though the core meaning is still apparent.
-      - No Marks (0): The response contains major grammatical or stylistic issues that make it difficult to understand or unprofessional.
+        *** Logical Coherence (totally 20 points) *** 
+        - Structure: Is the analysis logically structured, with a clear and complete flow?
+          10–9 points: Highly logical and well-structured
+          8–7 points: Mostly clear, with minor flaws
+          6–5 points: Noticeable gaps or missing steps
+          4–3 points: Poor structure or incomplete reasoning
+          2–1 points: Chaotic or entirely illogical
+        - Use of Conditions: Are all provided conditions effectively used?
+          10–9 points: Fully and correctly utilized
+          8–7 points: Mostly utilized, with minor omissions
+          6–5 points: Some conditions not effectively used
+          2–1 points: Misused or ignored
+
+        *** Clarity of Results (10 points) *** 
+        - If this is a computation qustion: Are the numerical results accurate, clear, and logically consistent?
+          10–9 points: Clear, accurate, and rigorous
+          8–7 points: Mostly correct, with minor inaccuracies
+          6–5 points: Significant errors or unclear presentation
+          2–1 points: Incorrect or irrelevant results
+        - Else, for other questions (responses require qualitative Insights): Are the explanations and reasoning clear and insightful?
+          10–9 points: Clear, insightful, and well-supported
+          8–7 points: Generally sound but somewhat superficial
+          6–5 points: Lacks depth or has inconsistencies
+          2–1 points: Weak or missing analysis
   `;
 
   const model = new ChatOpenAI({
@@ -156,7 +204,7 @@ async function evaluateAnswer(state: typeof StateAnnotation.State) {
   const response = await structuredLlm.invoke([
     {
       role: 'human',
-      content: `Evaluate the following response based on the criteria provided and provide suggestion on logic thinking to improve the quality of the response:\n\n
+      content: `Please evaluate the responses to the following question, focusing on logical coherence and whether it provides clear and reasonable results, and provide suggestion on logic thinking to improve the quality of the response. The evaluation criteria are:\n\n
       Criteria: ${evaluationCriteria}.
       Question: ${firstMessage.content}.
       Response: ${answer}.`,
@@ -173,7 +221,7 @@ async function evaluateAnswer(state: typeof StateAnnotation.State) {
 
 function routeModelThink(state: typeof StateAnnotation.State) {
   console.log('--- routeModelThink ---');
-  if (state.score > 90) {
+  if (state.score > 25) {
     console.log('---- finalResult ----');
     console.log(state.answers[state.answers.length - 1]);
     return '__end__';
@@ -185,11 +233,9 @@ function routeModelThink(state: typeof StateAnnotation.State) {
 const workflow = new StateGraph(StateAnnotation)
   .addNode('getAnswer', getAnswer)
   .addNode('evaluateAnswer', evaluateAnswer)
-  // .addNode('outputModel', outputModel)
   .addEdge('__start__', 'getAnswer')
   .addEdge('getAnswer', 'evaluateAnswer')
   .addConditionalEdges('evaluateAnswer', routeModelThink, ['getAnswer', '__end__']);
-// .addEdge('outputModel', '__end__');
 
 export const graph = workflow.compile({
   // if you want to update the state before calling the tools
