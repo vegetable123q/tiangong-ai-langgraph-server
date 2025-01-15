@@ -4,10 +4,10 @@
     "lint": "prettier -c --write \"**/**.{js,jsx,tsx,ts,less,md,json}\""
   },
   "dependencies": {
-    "@langchain/community": "^0.3.23",
-    "@langchain/core": "^0.3.27",
+    "@langchain/community": "^0.3.24",
+    "@langchain/core": "^0.3.30",
     "@langchain/langgraph": "^0.2.39",
-    "@langchain/openai": "^0.3.16",
+    "@langchain/openai": "^0.3.17",
     "axios": "^1.7.9",
     "langsmith": "^0.2.15",
     "neo4j-driver": "^5.27.0",
@@ -20,6 +20,6 @@
     "dotenv": "^16.4.7",
     "prettier": "^3.4.2",
     "prettier-plugin-organize-imports": "^4.1.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.3"
   }
 }
