@@ -1,13 +1,10 @@
 import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
 import type { AIMessage } from '@langchain/core/messages';
-import { AIMessageChunk } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 
-import { MessagesAnnotation, StateGraph, Annotation } from '@langchain/langgraph';
+import { Annotation, MessagesAnnotation, StateGraph } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { z } from 'zod';
-import SearchInternetTool from 'utils/tools/search_internet_tool';
-
 
 const InternalStateAnnotation = MessagesAnnotation;
 const OutputStateAnnotation = Annotation.Root({
@@ -83,7 +80,6 @@ async function outputModel(state: typeof InternalStateAnnotation.State) {
   // return { messages: messages };
 }
 
-
 const workflow = new StateGraph({
   input: InternalStateAnnotation,
   output: OutputStateAnnotation,
@@ -93,11 +89,7 @@ const workflow = new StateGraph({
   .addNode('tools', new ToolNode(tools))
   .addNode('outputModel', outputModel)
   .addEdge('__start__', 'callModel')
-  .addConditionalEdges(
-    'callModel',
-    routeModelOutput,
-    ['tools', 'outputModel'],
-  )
+  .addConditionalEdges('callModel', routeModelOutput, ['tools', 'outputModel'])
   .addEdge('tools', 'callModel')
   .addEdge('outputModel', '__end__');
 

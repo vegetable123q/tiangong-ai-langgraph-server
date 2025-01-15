@@ -1,69 +1,15 @@
-import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
 import { AIMessage, BaseMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 
-import { Annotation, StateGraph } from '@langchain/langgraph';
-import { ToolNode } from '@langchain/langgraph/prebuilt';
+import { Annotation, Command, StateGraph } from '@langchain/langgraph';
 
-import SearchEduTool from 'utils/tools/search_edu_tool';
-import SearchEsgTool from 'utils/tools/search_esg_tool';
-import SearchSciTool from 'utils/tools/search_sci_tool';
-import SearchStandardTool from './utils/tools/search_standard_tool';
-
-import { PythonInterpreterTool } from '@langchain/community/experimental/tools/pyinterpreter';
-import pyodideModule from 'pyodide';
+import { Calculator } from 'utils/nodes/agent_calculating';
+import { Reasoning } from 'utils/nodes/agent_reasoning';
 
 import { z } from 'zod';
 
-const email = process.env.EMAIL ?? '';
-const password = process.env.PASSWORD ?? '';
-
 const openai_api_key = process.env.OPENAI_API_KEY ?? '';
-// const openai_chat_model = process.env.OPENAI_CHAT_MODEL ?? '';
-// const openai_chat_model = 'o1-preview-2024-09-12';
-
-async function createPythonTool() {
-  const pyodide = await pyodideModule.loadPyodide();
-  if (!pyodide) {
-    console.error('Failed to load Pyodide');
-  } else {
-    console.log('Pyodide loaded successfully');
-  }
-  await pyodide.loadPackage(['numpy', 'pandas', 'scipy', 'sympy']);
-  const pythonTool = new PythonInterpreterTool({ instance: pyodide });
-  pythonTool.description =
-    'Executes Python code in a sandboxed environment and print the execution results. The environment resets after each execution. The tool captures both standard output (stdout) and error output (stderr) and returns them, ensuring any generated output or errors are available for further analysis.';
-  pyodide.globals.set('console', {
-    log: (msg: string) => {
-      console.log('Python Output:', msg);
-    },
-    error: (msg: string) => {
-      console.error('Python Error:', msg);
-    },
-  });
-  return pythonTool;
-}
-
-async function loadAllTools() {
-  const baseTools = [
-    new SearchEduTool({ email, password }),
-    new TavilySearchResults({ maxResults: 5 }),
-    new SearchEsgTool({ email, password }),
-    new SearchSciTool({ email, password }),
-    new SearchStandardTool({ email, password }),
-  ];
-  const pythonTool = await createPythonTool();
-  return [...baseTools, pythonTool];
-}
-
-async function buildToolNode() {
-  const toolsPromise = await loadAllTools();
-  const toolNode = new ToolNode(toolsPromise);
-  return toolNode;
-}
-
-const toolsPromise = loadAllTools();
-// const tools = [getWeather];
+const openai_chat_model = process.env.OPENAI_CHAT_MODEL ?? '';
 
 const StateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -76,72 +22,96 @@ const StateAnnotation = Annotation.Root({
   score: Annotation<number>(),
 });
 
-async function callModel(state: typeof StateAnnotation.State) {
-  console.log('---- callModel ----');
+const allocateTask = async (state: typeof StateAnnotation.State) => {
+  console.log('----  allocateTask  ----');
 
-  const loadedTools = await toolsPromise;
+  const taskType = z.object({
+    taskType: z
+      .enum(['Calculation', 'Reasoning', 'Wikipedia'])
+      .describe('The type of task to be performed by the model in the next step.'),
+  });
+
   const model = new ChatOpenAI({
     apiKey: openai_api_key,
-    modelName: 'o1-2024-12-17',
-    streamUsage: false,
+    modelName: openai_chat_model,
     streaming: false,
-  }).bindTools(loadedTools);
+  });
+  // this is a replacement for a real conditional edge function
+  const structuredLlm = model.withStructuredOutput(taskType);
+
+  const response = await structuredLlm.invoke([
+    {
+      role: 'human',
+      content: `You are an intelligent assistant skilled in analyzing and categorizing various types of problems. Given a problem statement, classify it into one of the following categories:
+- Calculation: The problem requires performing specific mathematical computations or executing code. If the problem only involves explaining the logical steps or methodology for a calculation (without actual computation), classify it as Reasoning.
+- Reasoning: The problem focuses on understanding concepts, logical thinking, or solving issues based on specialized knowledge (e.g., standards, academic papers, or reports). This includes explaining methodologies or theoretical concepts without performing calculations.
+- Wikipedia: The problem seeks simple, factual information that can be directly looked up or summarized from general sources like Wikipedia.`,
+    },
+    ...state.messages,
+  ]);
+  // note how Command allows you to BOTH update the graph state AND route to the next node
+  return new Command({
+    // this is a replacement for an edge
+    goto: response.taskType,
+  });
+};
+
+async function runCalculation(state: typeof StateAnnotation.State) {
+  console.log('---- runCalculation ----');
+  const { messages, answers } = await Calculator.invoke({
+    messages: [state.messages[0]],
+    suggestion: state.suggestion ? state.suggestion : '',
+  });
+  return {
+    messages: messages,
+    answers: answers,
+  };
+}
+
+async function runReasoning(state: typeof StateAnnotation.State) {
+  console.log('---- runReasoning ----');
+  const { messages, answers } = await Reasoning.invoke({
+    messages: [state.messages[0]],
+    suggestion: state.suggestion ? state.suggestion : '',
+  });
+  return {
+    messages: messages,
+    answers: answers,
+  };
+}
+
+async function runAnswering(state: typeof StateAnnotation.State) {
+  console.log('---- runAnswering ----');
+  const model_api_key = process.env.BAIDU_API_KEY ?? '';
+  const chat_model = process.env.BAIDU_CHAT_MODEL ?? '';
+  const base_url = process.env.BAIDU_BASE_URL ?? '';
+
+  const model = new ChatOpenAI({
+    apiKey: model_api_key,
+    modelName: chat_model,
+    streaming: false,
+    configuration: {
+      baseURL: base_url,
+    },
+  });
 
   const response = await model.invoke([
     {
       role: 'human',
-      content: `You are an expert in environmental science, tasked with solving the given problem. Please Analyze the problem and provide a detailed solution based on the information provided. Ensure your response is accurate, logical, and well-structured. Here are some guidelines:
-
-      1. **Analyze and Decompose the Problem**: Read the problem statement carefully. Identify the key components that need further investigation or data retrieval.
-      2. **Retrieve Relevant Information**: Use the available search tools to gather the latest and most authoritative information. Ensure all information is relevant, credible, and trustworthy.
-      3. **Evaluate and Synthesize the Information**: Assess the validity of the retrieved information, and integrate the most pertinent data to form a well-rounded understanding of the problem.
-      4. **Formulate the Solution**: Based on the synthesized information, develop a clear, logical, and evidence-based solution. Ensure your answer directly addresses the problem's core aspects.
-      5. **Review and Refine**: After drafting the solution, review it for accuracy, coherence, and clarity. Make necessary revisions to improve the logical flow and ensure completeness.
-      6. **Especially for calculation questions**: Invoke the appropriate tools (e.g., Python) to run the necessary code and ensure any Python code executed print the outputs, if the problem requires computation or specific code execution. Be sure to analyze the Python execution result (e.g., exact values) with supportive materials and integrate it into your final answer. Do not make any assumptions and do not infer parameter values.  
-      ***Important:*** DO NOT TRUMP UP! 
-
-      ${state.suggestion !== '' ? `- Suggestions: ${state.suggestion}` : ''}`,
+      content: `You are an environmental science expert tasked with answering questions. Please follow these guidelines to answer the problem.
+1. Read the Problem Carefully: Understand the question and determine whether it requires logical reasoning or factual knowledge.
+2. Answer Appropriately:
+- For Reasoning: Provide a step-by-step logical explanation, deducing the answer from the given information.
+- For Knowledge: Provide a direct, fact-based answer or explanation relevant to the subject matter.
+3. Be Clear and Concise: Ensure the answer is well-structured and precise.
+4. Language: use the same language as the question.
+${state.suggestion !== '' ? `*** Suggestions ***  ${state.suggestion}` : ''}`,
     },
     ...state.messages,
   ]);
-
   return {
     messages: response,
     answers: [response.lc_kwargs.content],
-  };
-}
-
-// Define the function that determines whether to continue or not
-function routeModelOutput(state: typeof StateAnnotation.State) {
-  console.log('------ routeModelOutput ------');
-  const messages = state.messages;
-  const lastMessage: AIMessage = messages[messages.length - 1];
-  // console.log(lastMessage);
-  if (lastMessage.tool_calls?.length) {
-    return 'tools';
-  }
-  return '__end__';
-}
-
-const subgraphBuilder = new StateGraph(StateAnnotation)
-  .addNode('callModel', callModel)
-  .addNode('tools', buildToolNode)
-  .addEdge('__start__', 'callModel')
-  .addConditionalEdges('callModel', routeModelOutput, ['tools', '__end__'])
-  .addEdge('tools', 'callModel');
-
-const subgraph = subgraphBuilder.compile();
-
-async function getAnswer(state: typeof StateAnnotation.State) {
-  console.log('---- getAnswer ----');
-  const { messages, answers } = await subgraph.invoke({
-    messages: [state.messages[0]],
-    suggestion: state.suggestion ? state.suggestion : '',
-  });
-
-  return {
-    messages: messages,
-    answers: answers,
   };
 }
 
@@ -194,8 +164,7 @@ async function evaluateAnswer(state: typeof StateAnnotation.State) {
 
   const model = new ChatOpenAI({
     apiKey: openai_api_key,
-    modelName: 'o1-2024-12-17',
-    streamUsage: false,
+    modelName: openai_chat_model,
     streaming: false,
   });
 
@@ -227,15 +196,20 @@ function routeModelThink(state: typeof StateAnnotation.State) {
     return '__end__';
   }
   console.log('---- getAnswer ----');
-  return 'getAnswer';
+  return 'allocateTask';
 }
 
 const workflow = new StateGraph(StateAnnotation)
-  .addNode('getAnswer', getAnswer)
+  .addNode('allocateTask', allocateTask, { ends: ['Calculation', 'Reasoning', 'Wikipedia'] })
+  .addNode('Calculation', runCalculation)
+  .addNode('Reasoning', runReasoning)
+  .addNode('Wikipedia', runAnswering)
   .addNode('evaluateAnswer', evaluateAnswer)
-  .addEdge('__start__', 'getAnswer')
-  .addEdge('getAnswer', 'evaluateAnswer')
-  .addConditionalEdges('evaluateAnswer', routeModelThink, ['getAnswer', '__end__']);
+  .addEdge('__start__', 'allocateTask')
+  .addEdge('Calculation', 'evaluateAnswer')
+  .addEdge('Reasoning', 'evaluateAnswer')
+  .addEdge('Wikipedia', 'evaluateAnswer')
+  .addConditionalEdges('evaluateAnswer', routeModelThink, ['allocateTask', '__end__']);
 
 export const graph = workflow.compile({
   // if you want to update the state before calling the tools
