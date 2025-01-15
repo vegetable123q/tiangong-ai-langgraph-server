@@ -47,7 +47,7 @@ const allocateTask = async (state: typeof StateAnnotation.State) => {
 - Reasoning: The problem focuses on understanding concepts, logical thinking, or solving issues based on specialized knowledge (e.g., standards, academic papers, or reports). This includes explaining methodologies or theoretical concepts without performing calculations.
 - Wikipedia: The problem seeks simple, factual information that can be directly looked up or summarized from general sources like Wikipedia.`,
     },
-    ...state.messages,
+    state.messages[0],
   ]);
   // note how Command allows you to BOTH update the graph state AND route to the next node
   return new Command({
