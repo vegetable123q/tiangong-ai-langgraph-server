@@ -15,7 +15,7 @@ class SearchStandardTool extends DynamicStructuredTool {
         topK: z.number().default(1).describe('Number of top chunk results to return.'),
         extK: z
           .number()
-          .default(2)
+          .default(20)
           .describe('Number of additional chunks to include before and after each topK result.'),
         filter: z
           .object({
