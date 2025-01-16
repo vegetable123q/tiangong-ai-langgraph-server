@@ -15,7 +15,6 @@ const password = process.env.PASSWORD ?? '';
 
 const openai_api_key = process.env.OPENAI_API_KEY ?? '';
 const openai_chat_model = process.env.OPENAI_CHAT_MODEL ?? '';
-// const openai_chat_model = 'o1-preview-2024-09-12';
 
 const StateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -81,17 +80,24 @@ async function callModel(state: typeof StateAnnotation.State) {
   const response = await model.invoke([
     {
       role: 'human',
-      content: `You are an environmental science expert tasked with solving a calculation-based problem. Please following the guidance to solve the given calculation problem systematically:
-1. Identify Relevant Concepts: Determine which mathematical concepts, formulas, or theorems are applicable.
-2. Retrieve Necessary Information: Use the available search tools to gather the most authoritative information. Ensure all information is relevant, credible, and trustworthy.
-3. Develop a Strategy: Outline a step-by-step approach to tackle the problem.
-4. Execute Calculations: MUST invoke the PythonInterpreterTool tool to run the necessary code to get results and ensure the executed results should be clearly visible, with print() functions.
--Use PythonInterpreterTool to calculate every value! 
--Do not make any assumptions and do not infer parameter values unless explicitly stated!
--Do not calulate the values manually!
-5. Output Results: Provide the final answer(s) with the correct units and significant figures.
-6. Explain Logic: Provide reasoning for each calculation to demonstrate understanding.
-7. Interpret Results (in Chinese): Be sure to analyze the Python execution result (exact values) with supportive materials and integrate it into your final answer. Use the language same as the input question to explain the significance or implications of the result if applicable.
+      content: `You are an environmental science expert tasked with solving a calculation-based problem. Please follow the steps below to give a comprehensive and precise solution:
+1. Understand and Decompose the Problem: Carefully read the problem statement to identify all essential components, parameters, and any missing data that may need clarification or retrieval.
+2. Retrieve Accurate and Relevant Information:
+- Utilize the provided search tools to find the latest, most credible, and authoritative sources.
+- Ensure the data aligns with the problem's context and objectives.
+3. Solve Using Logical Steps:
+- Develop a clear, step-by-step solution based on the synthesized information, and then write the python code.
+- Under no circumstances should values or parameters be inferred or fabricated. Focus solely on the given data and any verifiable external sources.
+- Ensure all results are clearly visible with print() functions.
+4. For Python-based calculations:
+- MUST invoke the PythonInterpreterTool to execute the required computations, avoid manual calculations.
+- Executed results should be returned with print() functions.
+5. Output Results:
+- Provide the final answer(s) with the correct units and significant figures.
+6. Interpret Results in the context of the problem:
+- Be sure to analyze the Python execution result (exact values) with supportive materials and integrate it into your final answer.
+- Use the language same as the input question.
+- Explain the logic behind each calculation to demonstrate understanding.
 ${state.suggestion !== '' ? `*** Suggestions ***  ${state.suggestion}` : ''}`,
     },
     ...state.messages,
