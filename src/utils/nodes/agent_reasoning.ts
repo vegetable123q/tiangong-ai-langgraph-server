@@ -1,12 +1,9 @@
 import { AIMessage, BaseMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 
-import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
 import { Annotation, StateGraph } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import SearchEduTool from 'utils/tools/search_edu_tool';
-import SearchEsgTool from 'utils/tools/search_esg_tool';
-import SearchSciTool from 'utils/tools/search_sci_tool';
 import SearchStandardTool from 'utils/tools/search_standard_tool';
 
 const email = process.env.EMAIL ?? '';
@@ -14,7 +11,6 @@ const password = process.env.PASSWORD ?? '';
 
 const openai_api_key = process.env.OPENAI_API_KEY ?? '';
 const openai_chat_model = process.env.OPENAI_CHAT_MODEL ?? '';
-// const openai_chat_model = 'o1-preview-2024-09-12';
 
 const StateAnnotation = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -29,9 +25,6 @@ const StateAnnotation = Annotation.Root({
 
 const baseTools = [
   new SearchEduTool({ email, password }),
-  new TavilySearchResults({ maxResults: 5 }),
-  new SearchEsgTool({ email, password }),
-  new SearchSciTool({ email, password }),
   new SearchStandardTool({ email, password }),
 ];
 const toolNode = new ToolNode(baseTools);
@@ -48,14 +41,24 @@ async function callModel(state: typeof StateAnnotation.State) {
   const response = await model.invoke([
     {
       role: 'human',
-      content: `You are an environmental science expert tasked with answering questions. Please follow these guidelines to answer the problem.
-1. Read the Problem Carefully: Understand the question and determine whether it requires logical reasoning or factual knowledge.
-2. Retrieve Necessary Information: Use the available search tools to gather the most authoritative information. Ensure all information is relevant, credible, and trustworthy.
-3. Answer Appropriately:
-- For Reasoning: Provide a step-by-step logical explanation, deducing the answer from the given information.
-- For Knowledge: Provide a direct, fact-based answer or explanation relevant to the subject matter.
-4. Be Clear and Concise: Ensure the answer is well-structured and precise.
-5. Language: use the same language as the question.
+      content: `You are an environmental science expert with extensive knowledge of logical reasoning, factual analysis, and structured problem-solving. Your goal is to provide accurate, well-reasoned, and comprehensive answers to questions. Ensure your responses are fully aligned with the scoring criteria by delivering clear and evidence-based solutions.
+Steps to Answer the Question:
+1. Understand the Question:
+-Identify all key elements in the question, such as important terms, concepts, individuals, events, methods, or numerical details.
+-Clarify the scope of the question, ensuring no part is left unaddressed.
+2. Research and Gather Information:
+-Use authoritative and credible sources to collect accurate and up-to-date information.
+-Focus on the most relevant facts, theories, or calculations related to the topic.
+3. Formulate a Structured and Comprehensive Response:
+-Address all aspects of the question, ensuring factual correctness, logical reasoning, and clarity.
+-Present a clear, step-by-step explanation supported by evidence.
+-Ensure logical flow and coherence when connecting evidence, assumptions, and conclusions.
+-Ensure covering all aspects of the question thoroughly, leaving no gaps.
+-Ensure all details are accurate and directly address the question.
+-Use formal and precise language that aligns with the question's phrasing.
+4. Summarize and Present the Final Answer:
+-Present the final answer clearly and succinctly, ensuring that it addresses the question completely.
+-Avoid unnecessary details or tangents; focus on relevance and alignment with the reference answer.
 ${state.suggestion !== '' ? `*** Suggestions ***  ${state.suggestion}` : ''}`,
     },
     ...state.messages,
