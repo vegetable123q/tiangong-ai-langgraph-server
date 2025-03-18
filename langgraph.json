@@ -4,13 +4,9 @@
   "dependencies": ["."],
   "graphs": {
     "agent": "./src/agent.ts:graph",
-    "rag_agent": "./src/rag_agent.ts:graph",
-    "kg_agent": "./src/kg_agent.ts:graph",
-    "esg_agent": "./src/esg_agent.ts:graph",
-    "kg_textbook_agent": "./src/kg_textbook_agent.ts:graph",
-    "esg_search_agent": "./src/esg_search_agent.ts:graph",
-    "elle_agent": "./src/elle_agent.ts:graph",
-    "question_agent": "./src/question_agent.ts:graph"
+    "mfa_search_agent": "./src/mfa_search_agent.ts:graph",
+    "merge_agent": "./src/merge_agent.ts:graph",
+    "esg_agent": "./src/esg_agent.ts:graph"
   },
   "env": ".env"
 }
