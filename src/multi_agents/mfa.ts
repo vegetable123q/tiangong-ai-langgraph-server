@@ -1,7 +1,6 @@
 import { Client } from '@langchain/langgraph-sdk';
 import { RemoteGraph } from '@langchain/langgraph/remote';
 import dotenv from 'dotenv';
-import PQueue from 'p-queue';
 import fs from 'fs';
 import path from 'path';
 
@@ -17,6 +16,14 @@ const mergeAgentGraphName = 'merge_agent';
 interface ToolCall {
   name: string;
   args: any;
+}
+
+// 定义边界项接口
+interface BoundaryItem {
+  source: string;
+  SpatialScope: string;
+  timeRange: string;
+  policyRecommendations: string[];
 }
 
 // 初始化客户端和远程图
@@ -39,7 +46,11 @@ async function performMfaSearch(query: string) {
   try {
     // 创建新线程
     const thread = await client.threads.create();
-    const config = { configurable: { thread_id: thread.thread_id } };
+    // 添加递归限制，避免陷入循环
+    const config = { 
+      configurable: { thread_id: thread.thread_id },
+      recursionLimit: 50 // 增加递归限制
+    };
     
     console.log(`Searching for: "${query}"`);
     const result = await mfaSearchGraph.invoke({ messages: [{ role: "user", content: query }] }, config);
@@ -61,32 +72,104 @@ async function performMfaSearch(query: string) {
 
 /**
  * 从搜索结果中提取边界数据
+ * 重新实现以支持直接的allBoundaryResults和消息内容
  */
-function extractBoundaryData(searchResult: any): any[] {
-  const boundaryData: any[] = [];
+function extractBoundaryData(searchResult: any): BoundaryItem[] {
+  const boundaryData: BoundaryItem[] = [];
   
+  // 检查是否存在直接返回的allBoundaryResults
+  if (searchResult?.allBoundaryResults && Array.isArray(searchResult.allBoundaryResults)) {
+    console.log(`Found direct allBoundaryResults with ${searchResult.allBoundaryResults.length} items`);
+    boundaryData.push(...searchResult.allBoundaryResults);
+    return boundaryData;
+  }
+  
+  // 回退方案：从消息中提取
   if (!searchResult?.messages) {
     return boundaryData;
   }
   
-  // 遍历所有消息寻找边界工具调用
+  // 遍历所有消息
   searchResult.messages.forEach((msg: any) => {
+    // 检查消息中是否包含allBoundaryResults
+    if (msg?.additional_kwargs?.allBoundaryResults && Array.isArray(msg.additional_kwargs.allBoundaryResults)) {
+      console.log(`Found allBoundaryResults in message's additional_kwargs with ${msg.additional_kwargs.allBoundaryResults.length} items`);
+      boundaryData.push(...msg.additional_kwargs.allBoundaryResults);
+      return;
+    }
+    
+    // 检查工具调用结果
     if (msg?.tool_calls && Array.isArray(msg.tool_calls)) {
       msg.tool_calls.forEach((call: ToolCall) => {
         if (call.name === 'extract_boundary' && call.args) {
           boundaryData.push(call.args);
+          console.log(`Found boundary data in tool call: ${call.name}`);
         }
       });
     }
+    
+    // 检查消息内容是否为JSON字符串格式的边界数据
+    if (msg?.content && typeof msg.content === 'string' && msg.role === 'assistant') {
+      try {
+        const content = msg.content.trim();
+        
+        // 跳过明确的"无结果"消息
+        if (content.startsWith('No relevant boundary information')) {
+          console.log('Message indicates no boundary information found');
+          return;
+        }
+        
+        // 尝试解析JSON
+        const parsedContent = JSON.parse(content);
+        
+        if (Array.isArray(parsedContent)) {
+          // 验证数据格式，确保是边界项数据
+          const validBoundaryItems = parsedContent.filter(item => 
+            item && typeof item === 'object' && 
+            'source' in item && 
+            'SpatialScope' in item && 
+            'timeRange' in item &&
+            'policyRecommendations' in item
+          );
+          
+          if (validBoundaryItems.length > 0) {
+            console.log(`Found ${validBoundaryItems.length} boundary items in message content`);
+            boundaryData.push(...validBoundaryItems);
+          }
+        }
+      } catch (error: unknown) {
+        // 不是有效的JSON，忽略
+        console.log(`Message content is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   });
+  
+  // 如果同时找到了两种来源的数据，可能需要去重
+  if (boundaryData.length > 0) {
+    console.log(`Total of ${boundaryData.length} boundary items extracted`);
+    
+    // 简单去重：根据source字段
+    const uniqueMap = new Map();
+    boundaryData.forEach(item => {
+      if (!uniqueMap.has(item.source)) {
+        uniqueMap.set(item.source, item);
+      }
+    });
+    
+    const uniqueData = Array.from(uniqueMap.values());
+    if (uniqueData.length < boundaryData.length) {
+      console.log(`Removed ${boundaryData.length - uniqueData.length} duplicate items`);
+      return uniqueData;
+    }
+  }
   
   return boundaryData;
 }
 
 /**
- * 合并多个MFA搜索结果（添加重试和批处理功能）
+ * 合并多个MFA搜索结果
  */
-async function mergeBoundaryData(boundaryData: any[]): Promise<any> {
+async function mergeBoundaryData(boundaryData: BoundaryItem[]): Promise<any> {
   console.log(`Merging ${boundaryData.length} boundary data items`);
   
   try {
@@ -132,7 +215,7 @@ async function mergeBoundaryData(boundaryData: any[]): Promise<any> {
 /**
  * 分批处理大量边界数据
  */
-async function mergeInBatches(boundaryData: any[]): Promise<any> {
+async function mergeInBatches(boundaryData: BoundaryItem[]): Promise<any> {
   console.log("Starting batch processing");
   
   // 将数据分成小批次
@@ -194,21 +277,19 @@ async function mergeInBatches(boundaryData: any[]): Promise<any> {
 }
 
 /**
- * 执行完整的搜索流程：直接使用原始查询 -> MFA搜索 -> 合并结果
+ * 执行完整的搜索流程
  */
 export async function searchExpandAndMerge(userQuery: string): Promise<any> {
   try {
     console.log(`Starting search process for: "${userQuery}"`);
     
-    // 步骤1: 直接使用原始查询
-    console.log(`Using original query without journal specialization: "${userQuery}"`);
-    
-    // 步骤2: 执行MFA搜索
+    // 步骤1: 执行MFA搜索
+    console.log(`Using query: "${userQuery}"`);
     const searchResult = await performMfaSearch(userQuery);
     console.log(`Search ${searchResult.success ? 'completed successfully' : 'failed'}`);
     
-    // 步骤3: 收集边界数据
-    const allBoundaryData: any[] = [];
+    // 步骤2: 收集边界数据
+    const allBoundaryData: BoundaryItem[] = [];
     if (searchResult.success && searchResult.result) {
       const boundaryItems = extractBoundaryData(searchResult.result);
       console.log(`Found ${boundaryItems.length} boundary items for query: "${userQuery}"`);
@@ -236,10 +317,10 @@ export async function searchExpandAndMerge(userQuery: string): Promise<any> {
       };
     }
     
-    // 步骤4: 合并边界数据
+    // 步骤3: 合并边界数据
     const mergeResult = await mergeBoundaryData(allBoundaryData);
     
-    // 步骤5: 提取并保存合并结果
+    // 步骤4: 提取并保存合并结果
     let parsedMergeResult = null;
     if (mergeResult.messages && mergeResult.messages.length > 0) {
       const lastMessage = mergeResult.messages[mergeResult.messages.length - 1];
@@ -255,7 +336,7 @@ export async function searchExpandAndMerge(userQuery: string): Promise<any> {
       console.log(`Merged results saved to: ${mergedResultPath}`);
     }
     
-    // 步骤6: 返回完整结果
+    // 步骤5: 返回完整结果
     return {
       originalQuery: userQuery,
       searchSuccess: searchResult.success,

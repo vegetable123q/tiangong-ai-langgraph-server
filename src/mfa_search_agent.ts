@@ -85,7 +85,7 @@ async function callModel(state: typeof StateAnnotation.State) {
 
   const prompt = ChatPromptTemplate.fromTemplate(
     `You are given a task\n
-    The retrieved results are 80 to include more related information. \n
+    The retrieved results are 50 to include more related information. \n
     Please only use the SearchSciTool to search for the task description.\n
     You can increase the extK parameter to get more information.extK varies from 5 to 8.\n
     Task description: {description}\n`,
@@ -237,8 +237,9 @@ async function processBatch(
         {retrievedContents}\n
         
         
-        For policy recommendations, extract relevant information from the content.\n
-        And for policy recommendations it should include at least one sentence above and below the key information`,
+        For policy recommendations, extract relevant information from the content. e.g. the government should encourage recycling construction waste\n
+        And for policy recommendations it should include at least two sentence above and below the key information. At least conclude 3 policy recommendations.\n
+        The policy recommendations should be over 150 words.\n`,
       );
 
   const boundaryModel = new ChatOpenAI({
@@ -298,6 +299,7 @@ async function completeProcessing(
   };
 }
 
+
 // 合并所有批次的结果
 async function mergeResults(
   state: typeof StateAnnotation.State,
@@ -306,29 +308,11 @@ async function mergeResults(
   
   const { allBoundaryResults } = state;
   console.log(`Merging ${allBoundaryResults.length} total boundary items`);
-
-  // 如果没有结果，返回空消息
-  if (allBoundaryResults.length === 0) {
-    return {
-      messages: [
-        {
-          role: 'assistant',
-          content: 'No relevant boundary information was found from the search results.',
-        } as unknown as BaseMessage,
-      ],
-    };
-  }
-
-  // 创建包含所有结果的消息，使用JSON.stringify保持原始数据格式
-  return {
-    messages: [
-      {
-        role: 'assistant',
-        content: JSON.stringify(allBoundaryResults, null, 2),
-      } as unknown as BaseMessage,
-    ],
-  };
+  
+  // 直接返回结果数组，无需添加任何包装
+  return { allBoundaryResults };
 }
+
 // 修改工作流，支持批处理
 const workflow = new StateGraph(StateAnnotation)
   .addNode('callModel', callModel)
