@@ -32,29 +32,6 @@ const mergeAgentGraph = new RemoteGraph({
   apiKey: apiKey
 });
 
-// 定义期刊列表
-const JOURNALS = [
-  "JOURNAL OF INDUSTRIAL ECOLOGY",
-  "RESOURCES CONSERVATION AND RECYCLING",
-  "JOURNAL OF CLEANER PRODUCTION",
-  "ENVIRONMENTAL SCIENCE & TECHNOLOGY",
-  "BUILDING RESEARCH AND INFORMATION",
-  "APPLIED ENERGY",
-  "WASTE MANAGEMENT",
-  "FRONTIERS IN EARTH SCIENCE",
-  "SCIENTIFIC DATA",
-  "ENVIRONMENTAL IMPACT ASSESSMENT REVIEW",
-  "SUSTAINABILITY"
-];
-
-/**
- * 创建期刊专业查询 - 用原始查询加上期刊名
- */
-function createJournalQueries(userQuery: string): string[] {
-  console.log(`Creating ${JOURNALS.length} journal-specific queries`);
-  return JOURNALS.map(journal => `${userQuery} in ${journal}`);
-}
-
 /**
  * 对单个查询执行MFA搜索
  */
@@ -217,36 +194,26 @@ async function mergeInBatches(boundaryData: any[]): Promise<any> {
 }
 
 /**
- * 执行完整的搜索流程：创建期刊查询 -> MFA搜索 -> 合并结果
+ * 执行完整的搜索流程：直接使用原始查询 -> MFA搜索 -> 合并结果
  */
 export async function searchExpandAndMerge(userQuery: string): Promise<any> {
   try {
-    console.log(`Starting search process for: "${userQuery}" with journal specialization`);
+    console.log(`Starting search process for: "${userQuery}"`);
     
-    // 步骤1: 创建期刊查询
-    const journalQueries = createJournalQueries(userQuery);
-    console.log(`Created ${journalQueries.length} journal-specific queries`);
+    // 步骤1: 直接使用原始查询
+    console.log(`Using original query without journal specialization: "${userQuery}"`);
     
-    // 步骤2: 并行执行MFA搜索
-    const queue = new PQueue({ concurrency: 3 }); // 限制并发数
-    const searchTasks = journalQueries.map((query: string) => 
-      queue.add(() => performMfaSearch(query))
-    );
+    // 步骤2: 执行MFA搜索
+    const searchResult = await performMfaSearch(userQuery);
+    console.log(`Search ${searchResult.success ? 'completed successfully' : 'failed'}`);
     
-    // 等待所有搜索完成
-    const searchResults = await Promise.all(searchTasks);
-    const successfulSearches = searchResults.filter(r => r.success).length;
-    console.log(`Completed ${successfulSearches}/${searchResults.length} searches successfully`);
-    
-    // 步骤3: 收集所有边界数据
+    // 步骤3: 收集边界数据
     const allBoundaryData: any[] = [];
-    searchResults.forEach(result => {
-      if (result.success && result.result) {
-        const boundaryItems = extractBoundaryData(result.result);
-        console.log(`Found ${boundaryItems.length} boundary items for query: "${result.query}"`);
-        allBoundaryData.push(...boundaryItems);
-      }
-    });
+    if (searchResult.success && searchResult.result) {
+      const boundaryItems = extractBoundaryData(searchResult.result);
+      console.log(`Found ${boundaryItems.length} boundary items for query: "${userQuery}"`);
+      allBoundaryData.push(...boundaryItems);
+    }
     
     console.log(`Total boundary data items collected: ${allBoundaryData.length}`);
     
@@ -265,9 +232,6 @@ export async function searchExpandAndMerge(userQuery: string): Promise<any> {
     if (allBoundaryData.length === 0) {
       return {
         originalQuery: userQuery,
-        journalQueries: journalQueries,
-        searchCount: searchResults.length,
-        successfulSearches,
         error: "No boundary data found in search results"
       };
     }
@@ -294,9 +258,7 @@ export async function searchExpandAndMerge(userQuery: string): Promise<any> {
     // 步骤6: 返回完整结果
     return {
       originalQuery: userQuery,
-      journalQueries: journalQueries,
-      searchCount: searchResults.length,
-      successfulSearches,
+      searchSuccess: searchResult.success,
       boundaryItemsCount: allBoundaryData.length,
       mergedResults: mergeResult,
       parsedResults: parsedMergeResult
@@ -318,7 +280,7 @@ if (require.main === module) {
     process.exit(1);
   }
   
-  console.log("开始执行完整搜索流程...");
+  console.log("开始执行搜索流程...");
   searchExpandAndMerge(query)
     .then(results => {
       console.log("\n===== 结果摘要 =====");
@@ -327,8 +289,7 @@ if (require.main === module) {
       if (results.error) {
         console.log(`错误: ${results.error}`);
       } else {
-        console.log(`基于 10 个期刊创建的查询`);
-        console.log(`成功搜索: ${results.successfulSearches}/${results.searchCount}`);
+        console.log(`搜索是否成功: ${results.searchSuccess}`);
         console.log(`收集的边界项: ${results.boundaryItemsCount}`);
         
         if (results.parsedResults) {
