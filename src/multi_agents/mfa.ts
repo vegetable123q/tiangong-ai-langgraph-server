@@ -3,6 +3,7 @@ import { RemoteGraph } from '@langchain/langgraph/remote';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 
 dotenv.config();
 
@@ -10,20 +11,16 @@ dotenv.config();
 const url = process.env.DEPLOYMENT_URL ?? '';
 const apiKey = process.env.LANGSMITH_API_KEY ?? '';
 const mfaSearchGraphName = 'mfa_search_agent';
+const extractAgentGraphName = 'extract_agent';
 const mergeAgentGraphName = 'merge_agent';
 
-// 定义工具调用接口
-interface ToolCall {
-  name: string;
-  args: any;
-}
-
-// 定义边界项接口
+// 边界项接口定义
 interface BoundaryItem {
   source: string;
   SpatialScope: string;
   timeRange: string;
   policyRecommendations: string[];
+  spatialTag?: string;
 }
 
 // 初始化客户端和远程图
@@ -33,6 +30,11 @@ const mfaSearchGraph = new RemoteGraph({
   url: url, 
   apiKey: apiKey 
 });
+const extractAgentGraph = new RemoteGraph({
+  graphId: extractAgentGraphName,
+  url: url,
+  apiKey: apiKey
+});
 const mergeAgentGraph = new RemoteGraph({
   graphId: mergeAgentGraphName,
   url: url,
@@ -40,347 +42,441 @@ const mergeAgentGraph = new RemoteGraph({
 });
 
 /**
- * 对单个查询执行MFA搜索
+ * 执行MFA搜索获取内容组
  */
-async function performMfaSearch(query: string) {
+async function performSearchAndGetContentGroups(query: string): Promise<string[]> {
   try {
+    console.log(`Executing search for: "${query}"`);
+    
     // 创建新线程
     const thread = await client.threads.create();
-    // 添加递归限制，避免陷入循环
     const config = { 
       configurable: { thread_id: thread.thread_id },
-      recursionLimit: 50 // 增加递归限制
+      recursionLimit: 50
     };
     
-    console.log(`Searching for: "${query}"`);
-    const result = await mfaSearchGraph.invoke({ messages: [{ role: "user", content: query }] }, config);
+    // 调用MFA搜索代理
+    const result = await mfaSearchGraph.invoke({ 
+      messages: [{ role: "user", content: query }] 
+    }, config);
     
-    return {
-      query,
-      result: result,
-      success: true
-    };
-  } catch (error: unknown) {
-    console.error(`Error searching for "${query}":`, error);
-    return {
-      query,
-      error: error instanceof Error ? error.message : "Unknown error",
-      success: false
-    };
-  }
-}
-
-/**
- * 从搜索结果中提取边界数据
- * 重新实现以支持直接的allBoundaryResults和消息内容
- */
-function extractBoundaryData(searchResult: any): BoundaryItem[] {
-  const boundaryData: BoundaryItem[] = [];
-  
-  // 检查是否存在直接返回的allBoundaryResults
-  if (searchResult?.allBoundaryResults && Array.isArray(searchResult.allBoundaryResults)) {
-    console.log(`Found direct allBoundaryResults with ${searchResult.allBoundaryResults.length} items`);
-    boundaryData.push(...searchResult.allBoundaryResults);
-    return boundaryData;
-  }
-  
-  // 回退方案：从消息中提取
-  if (!searchResult?.messages) {
-    return boundaryData;
-  }
-  
-  // 遍历所有消息
-  searchResult.messages.forEach((msg: any) => {
-    // 检查消息中是否包含allBoundaryResults
-    if (msg?.additional_kwargs?.allBoundaryResults && Array.isArray(msg.additional_kwargs.allBoundaryResults)) {
-      console.log(`Found allBoundaryResults in message's additional_kwargs with ${msg.additional_kwargs.allBoundaryResults.length} items`);
-      boundaryData.push(...msg.additional_kwargs.allBoundaryResults);
-      return;
-    }
+    console.log('Search completed successfully');
     
-    // 检查工具调用结果
-    if (msg?.tool_calls && Array.isArray(msg.tool_calls)) {
-      msg.tool_calls.forEach((call: ToolCall) => {
-        if (call.name === 'extract_boundary' && call.args) {
-          boundaryData.push(call.args);
-          console.log(`Found boundary data in tool call: ${call.name}`);
-        }
-      });
-    }
+    // 提取内容批次
+    const contentGroups: string[] = [];
     
-    // 检查消息内容是否为JSON字符串格式的边界数据
-    if (msg?.content && typeof msg.content === 'string' && msg.role === 'assistant') {
-      try {
-        const content = msg.content.trim();
-        
-        // 跳过明确的"无结果"消息
-        if (content.startsWith('No relevant boundary information')) {
-          console.log('Message indicates no boundary information found');
-          return;
-        }
-        
-        // 尝试解析JSON
-        const parsedContent = JSON.parse(content);
-        
-        if (Array.isArray(parsedContent)) {
-          // 验证数据格式，确保是边界项数据
-          const validBoundaryItems = parsedContent.filter(item => 
-            item && typeof item === 'object' && 
-            'source' in item && 
-            'SpatialScope' in item && 
-            'timeRange' in item &&
-            'policyRecommendations' in item
-          );
-          
-          if (validBoundaryItems.length > 0) {
-            console.log(`Found ${validBoundaryItems.length} boundary items in message content`);
-            boundaryData.push(...validBoundaryItems);
+    // 尝试从不同位置提取内容组
+    if (result.contentBatches && Array.isArray(result.contentBatches)) {
+      // 处理一维或二维数组
+      if (Array.isArray(result.contentBatches[0])) {
+        // 二维数组的情况
+        result.contentBatches.forEach((batch: string[]) => {
+          contentGroups.push(...batch);
+        });
+      } else {
+        // 一维数组的情况
+        contentGroups.push(...result.contentBatches);
+      }
+      console.log(`Found ${contentGroups.length} content groups directly in result`);
+    } else if (result.messages && Array.isArray(result.messages)) {
+      // 尝试从消息中提取
+      for (const message of result.messages) {
+        // 检查additional_kwargs
+        if (message.additional_kwargs?.contentBatches) {
+          const batches = message.additional_kwargs.contentBatches;
+          if (Array.isArray(batches)) {
+            if (Array.isArray(batches[0])) {
+              batches.forEach((batch: string[]) => {
+                contentGroups.push(...batch);
+              });
+            } else {
+              contentGroups.push(...batches);
+            }
+            console.log(`Found ${contentGroups.length} content groups in message additional_kwargs`);
           }
         }
-      } catch (error: unknown) {
-        // 不是有效的JSON，忽略
-        console.log(`Message content is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-  });
-  
-  // 如果同时找到了两种来源的数据，可能需要去重
-  if (boundaryData.length > 0) {
-    console.log(`Total of ${boundaryData.length} boundary items extracted`);
     
-    // 简单去重：根据source字段
-    const uniqueMap = new Map();
-    boundaryData.forEach(item => {
-      if (!uniqueMap.has(item.source)) {
-        uniqueMap.set(item.source, item);
-      }
-    });
-    
-    const uniqueData = Array.from(uniqueMap.values());
-    if (uniqueData.length < boundaryData.length) {
-      console.log(`Removed ${boundaryData.length - uniqueData.length} duplicate items`);
-      return uniqueData;
-    }
+    console.log(`Total content groups extracted: ${contentGroups.length}`);
+    return contentGroups;
+  } catch (error) {
+    console.error('Error during MFA search:', error);
+    throw new Error(`Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-  
-  return boundaryData;
 }
 
 /**
- * 合并多个MFA搜索结果
+ * 对单一内容组使用extract_agent提取边界信息
  */
-async function mergeBoundaryData(boundaryData: BoundaryItem[]): Promise<any> {
-  console.log(`Merging ${boundaryData.length} boundary data items`);
-  
+async function extractBoundaryFromContent(content: string, query: string): Promise<BoundaryItem | null> {
   try {
-    // 如果数据过多，分批处理
-    if (boundaryData.length > 15) {
-      console.log("Large dataset detected, using batch processing");
-      return await mergeInBatches(boundaryData);
+    console.log(`Extracting boundary from content (preview): ${content.substring(0, 100)}...`);
+    
+    // 调用提取代理
+    const extractResult = await extractAgentGraph.invoke({
+      content: content,
+      query: query
+    });
+    
+    // 检查提取结果
+    if (extractResult.isRelevant && extractResult.boundaryItem) {
+      console.log('Content is relevant, boundary extracted successfully');
+      console.log(`Evaluation score: ${extractResult.evaluationResult?.score?.toFixed(2) || 'N/A'}`);
+      console.log(`Cycles completed: ${extractResult.cycleCount || 1}`);
+      return extractResult.boundaryItem;
+    } else {
+      console.log(`Content is ${extractResult.isRelevant ? 'relevant but extraction failed' : 'not relevant'}`);
+      return null;
     }
+  } catch (error) {
+    console.error('Error extracting boundary:', error);
+    return null;
+  }
+}
+
+/**
+ * 合并一批边界项
+ */
+async function mergeBoundaryBatch(boundaryBatch: BoundaryItem[]): Promise<BoundaryItem[]> {
+  try {
+    console.log(`Merging batch of ${boundaryBatch.length} boundary items`);
     
     // 创建新线程
-    const mergeThread = await client.threads.create();
-    const mergeConfig = { 
-      configurable: { 
-        thread_id: mergeThread.thread_id
-      },
-      // 增加超时设置
-      timeout: 120000, // 120秒
-      maxRetries: 3 // 最多重试3次
+    const thread = await client.threads.create();
+    const config = { 
+      configurable: { thread_id: thread.thread_id },
+      recursionLimit: 10
     };
     
-    // 创建包含所有边界数据的消息
-    const messages = boundaryData.map(data => ({
-      role: "user",
-      content: JSON.stringify(data)
+    // 准备消息
+    const messages = boundaryBatch.map(item => ({
+      role: "user", 
+      content: JSON.stringify(item)
     }));
     
     // 调用合并代理
-    return await mergeAgentGraph.invoke({ messages }, mergeConfig);
-  } catch (error) {
-    console.error("Error merging boundary data:", error);
+    const result = await mergeAgentGraph.invoke({ messages }, config);
     
-    // 出错时返回未合并的原始数据
-    console.log("Falling back to unmerged data");
-    return {
-      messages: [{ 
-        role: "assistant", 
-        content: JSON.stringify(boundaryData)
-      }]
-    };
-  }
-}
-
-/**
- * 分批处理大量边界数据
- */
-async function mergeInBatches(boundaryData: BoundaryItem[]): Promise<any> {
-  console.log("Starting batch processing");
-  
-  // 将数据分成小批次
-  const batchSize = 10;
-  const batches = [];
-  for (let i = 0; i < boundaryData.length; i += batchSize) {
-    batches.push(boundaryData.slice(i, i + batchSize));
-  }
-  
-  console.log(`Split into ${batches.length} batches`);
-  
-  // 处理每个批次
-  const mergedBatches = [];
-  for (let i = 0; i < batches.length; i++) {
-    console.log(`Processing batch ${i+1}/${batches.length}`);
-    try {
-      // 创建新线程
-      const mergeThread = await client.threads.create();
-      const mergeConfig = { 
-        configurable: { thread_id: mergeThread.thread_id },
-        timeout: 60000,
-        maxRetries: 2
-      };
-      
-      // 创建消息
-      const messages = batches[i].map(data => ({
-        role: "user",
-        content: JSON.stringify(data)
-      }));
-      
-      // 调用合并代理
-      const result = await mergeAgentGraph.invoke({ messages }, mergeConfig);
-      
-      // 解析结果并添加到合并批次
-      if (result.messages && result.messages.length > 0) {
-        const lastMessage = result.messages[result.messages.length - 1];
-        if (typeof lastMessage.content === 'string') {
-          const parsed = JSON.parse(lastMessage.content);
-          mergedBatches.push(...(Array.isArray(parsed) ? parsed : [parsed]));
+    // 解析结果
+    let mergedItems: BoundaryItem[] = [];
+    if (result.messages && result.messages.length > 0) {
+      const lastMessage = result.messages[result.messages.length - 1];
+      if (typeof lastMessage.content === 'string') {
+        try {
+          const parsedContent = JSON.parse(lastMessage.content);
+          if (Array.isArray(parsedContent)) {
+            mergedItems = parsedContent;
+          } else {
+            mergedItems = [parsedContent];
+          }
+        } catch (e) {
+          console.error('Failed to parse merge agent response:', e);
         }
       }
-      
-      // 添加延迟，避免请求过快
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    } catch (error) {
-      console.error(`Error processing batch ${i+1}:`, error);
-      // 将该批次未合并的数据添加到结果
-      mergedBatches.push(...batches[i]);
     }
+    
+    console.log(`Merged batch resulted in ${mergedItems.length} items`);
+    return mergedItems;
+  } catch (error) {
+    console.error('Error merging boundary batch:', error);
+    return boundaryBatch; // 失败时返回原始批次
   }
-  
-  // 返回批次合并结果
-  return {
-    messages: [{ 
-      role: "assistant", 
-      content: JSON.stringify(mergedBatches)
-    }]
-  };
 }
 
 /**
- * 执行完整的搜索流程
+ * 执行完整的集成工作流
  */
-export async function searchExpandAndMerge(userQuery: string): Promise<any> {
+export async function runIntegratedWorkflow(userQuery: string): Promise<any> {
   try {
-    console.log(`Starting search process for: "${userQuery}"`);
+    // 创建会话标识和时间戳
+    const sessionId = uuidv4().substring(0, 8);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const safeQuery = userQuery.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_').substring(0, 20);
     
-    // 步骤1: 执行MFA搜索
-    console.log(`Using query: "${userQuery}"`);
-    const searchResult = await performMfaSearch(userQuery);
-    console.log(`Search ${searchResult.success ? 'completed successfully' : 'failed'}`);
-    
-    // 步骤2: 收集边界数据
-    const allBoundaryData: BoundaryItem[] = [];
-    if (searchResult.success && searchResult.result) {
-      const boundaryItems = extractBoundaryData(searchResult.result);
-      console.log(`Found ${boundaryItems.length} boundary items for query: "${userQuery}"`);
-      allBoundaryData.push(...boundaryItems);
-    }
-    
-    console.log(`Total boundary data items collected: ${allBoundaryData.length}`);
-    
-    // 保存原始边界数据
+    // 创建输出目录
     const outputDir = path.join(__dirname, '../../outputs');
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
     
-    const safeQuery = userQuery.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_').substring(0, 20);
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const boundaryDataPath = path.join(outputDir, `boundary_data_${safeQuery}_${timestamp}.json`);
-    fs.writeFileSync(boundaryDataPath, JSON.stringify(allBoundaryData, null, 2));
-    console.log(`Raw boundary data saved to: ${boundaryDataPath}`);
+    console.log(`==========================================`);
+    console.log(`Starting integrated workflow for query: "${userQuery}"`);
+    console.log(`Session ID: ${sessionId}`);
+    console.log(`==========================================`);
     
-    if (allBoundaryData.length === 0) {
+    // 步骤1: 搜索并获取内容组
+    console.log(`\n====== STEP 1: MFA SEARCH ======`);
+    const contentGroups = await performSearchAndGetContentGroups(userQuery);
+    
+    if (contentGroups.length === 0) {
+      console.log('No content groups found, workflow terminated');
       return {
-        originalQuery: userQuery,
-        error: "No boundary data found in search results"
+        success: false,
+        query: userQuery,
+        error: 'No content found from search'
       };
     }
     
-    // 步骤3: 合并边界数据
-    const mergeResult = await mergeBoundaryData(allBoundaryData);
+    // 保存搜索结果
+    const searchResultsPath = path.join(outputDir, `search_results_${safeQuery}_${sessionId}.json`);
+    fs.writeFileSync(searchResultsPath, JSON.stringify(contentGroups, null, 2));
+    console.log(`Search results saved to: ${searchResultsPath}`);
     
-    // 步骤4: 提取并保存合并结果
-    let parsedMergeResult = null;
-    if (mergeResult.messages && mergeResult.messages.length > 0) {
-      const lastMessage = mergeResult.messages[mergeResult.messages.length - 1];
-      if (typeof lastMessage.content === 'string') {
-        parsedMergeResult = JSON.parse(lastMessage.content);
+    // 步骤2: 对每个内容组提取边界信息
+    console.log(`\n====== STEP 2: BOUNDARY EXTRACTION ======`);
+    console.log(`Processing ${contentGroups.length} content groups for extraction`);
+    
+    // 并行处理内容组，限制并发数
+    const extractionPromises: Promise<BoundaryItem | null>[] = [];
+    const maxConcurrent = 4;
+    let activePromises = 0;
+    let index = 0;
+    
+    while (index < contentGroups.length || activePromises > 0) {
+      if (index < contentGroups.length && activePromises < maxConcurrent) {
+        // 启动新的提取任务
+        console.log(`Starting extraction for content ${index + 1}/${contentGroups.length}`);
+        const contentGroup = contentGroups[index];
+        
+        const promise = extractBoundaryFromContent(contentGroup, userQuery)
+          .then(result => {
+            activePromises--;
+            return result;
+          })
+          .catch(error => {
+            console.error(`Error in extraction promise ${index + 1}:`, error);
+            activePromises--;
+            return null;
+          });
+        
+        extractionPromises.push(promise);
+        activePromises++;
+        index++;
+      } else {
+        // 等待一个任务完成
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
     
-    // 保存合并结果
-    if (parsedMergeResult) {
-      const mergedResultPath = path.join(outputDir, `merged_results_${safeQuery}_${timestamp}.json`);
-      fs.writeFileSync(mergedResultPath, JSON.stringify(parsedMergeResult, null, 2));
-      console.log(`Merged results saved to: ${mergedResultPath}`);
+    // 等待所有提取任务完成
+    const allExtractedResults = await Promise.all(extractionPromises);
+    
+    // 过滤有效结果
+    const validBoundaryItems = allExtractedResults.filter(item => item !== null) as BoundaryItem[];
+    console.log(`\nExtracted ${validBoundaryItems.length} valid boundary items out of ${contentGroups.length} content groups`);
+    
+    if (validBoundaryItems.length === 0) {
+      console.log('No valid boundary items extracted, workflow terminated');
+      return {
+        success: false,
+        query: userQuery,
+        error: 'No valid boundary information could be extracted'
+      };
     }
     
-    // 步骤5: 返回完整结果
-    return {
-      originalQuery: userQuery,
-      searchSuccess: searchResult.success,
-      boundaryItemsCount: allBoundaryData.length,
-      mergedResults: mergeResult,
-      parsedResults: parsedMergeResult
+    // 保存提取结果
+    const extractionResultsPath = path.join(outputDir, `extraction_results_${safeQuery}_${sessionId}.json`);
+    fs.writeFileSync(extractionResultsPath, JSON.stringify(validBoundaryItems, null, 2));
+    console.log(`Extraction results saved to: ${extractionResultsPath}`);
+    
+    // 步骤3: 分批处理边界项进行合并
+    console.log(`\n====== STEP 3: BATCH MERGING ======`);
+    
+    // 将边界项分成每批5个的批次
+    const batchSize = 5;
+    const batches: BoundaryItem[][] = [];
+    
+    for (let i = 0; i < validBoundaryItems.length; i += batchSize) {
+      batches.push(validBoundaryItems.slice(i, i + batchSize));
+    }
+    
+    console.log(`Split ${validBoundaryItems.length} boundary items into ${batches.length} batches (batch size: ${batchSize})`);
+    
+    // 并行处理每个批次，限制并发数
+    const mergePromises: Promise<BoundaryItem[]>[] = [];
+    let activeMergePromises = 0;
+    let batchIndex = 0;
+    
+    while (batchIndex < batches.length || activeMergePromises > 0) {
+      if (batchIndex < batches.length && activeMergePromises < maxConcurrent) {
+        // 启动新的合并任务
+        console.log(`Starting merge for batch ${batchIndex + 1}/${batches.length}`);
+        const batch = batches[batchIndex];
+        
+        const promise = mergeBoundaryBatch(batch)
+          .then(result => {
+            activeMergePromises--;
+            return result;
+          })
+          .catch(error => {
+            console.error(`Error in merge promise ${batchIndex + 1}:`, error);
+            activeMergePromises--;
+            return batch; // 错误时返回原始批次
+          });
+        
+        mergePromises.push(promise);
+        activeMergePromises++;
+        batchIndex++;
+      } else {
+        // 等待一个任务完成
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    
+    // 等待所有合并任务完成
+    const allMergedBatches = await Promise.all(mergePromises);
+    
+    // 收集所有合并结果
+    const allMergedItems: BoundaryItem[] = [];
+    allMergedBatches.forEach(batch => {
+      allMergedItems.push(...batch);
+    });
+    
+    console.log(`\nMerged into a total of ${allMergedItems.length} boundary items`);
+    
+    // 步骤4: 最终去重和结果整理
+    console.log(`\n====== STEP 4: FINAL DEDUPLICATION ======`);
+    
+    // 按source进行最终去重
+    const finalMap = new Map<string, BoundaryItem>();
+    allMergedItems.forEach(item => {
+      if (!finalMap.has(item.source)) {
+        finalMap.set(item.source, item);
+      }
+    });
+    
+    const finalResults = Array.from(finalMap.values());
+    console.log(`Final deduplication: ${allMergedItems.length} → ${finalResults.length} unique items`);
+    
+    // 按空间标签分组
+    type GroupedResults = {
+      city: BoundaryItem[];
+      province: BoundaryItem[];
+      national: BoundaryItem[];
+      focus: BoundaryItem[];
+      untagged: BoundaryItem[];
     };
-  } catch (error: unknown) {
-    console.error("Error in search and merge process:", error);
+    
+    const groupedResults: GroupedResults = {
+      city: [],
+      province: [],
+      national: [],
+      focus: [],
+      untagged: []
+    };
+    
+    finalResults.forEach(item => {
+      if (!item.spatialTag) {
+        groupedResults.untagged.push(item);
+      } else if (Object.keys(groupedResults).includes(item.spatialTag)) {
+        groupedResults[item.spatialTag as keyof GroupedResults].push(item);
+      } else {
+        groupedResults.untagged.push(item);
+      }
+    });
+    
+    // 保存最终结果
+    const finalResultsPath = path.join(outputDir, `final_results_${safeQuery}_${sessionId}.json`);
+    fs.writeFileSync(finalResultsPath, JSON.stringify(finalResults, null, 2));
+    
+    // 保存分组结果
+    const groupedResultsPath = path.join(outputDir, `grouped_results_${safeQuery}_${sessionId}.json`);
+    fs.writeFileSync(groupedResultsPath, JSON.stringify(groupedResults, null, 2));
+    
+    console.log(`\nFinal results saved to: ${finalResultsPath}`);
+    console.log(`Grouped results saved to: ${groupedResultsPath}`);
+    
+    // 简化返回，只包含分组后的结果
     return {
-      originalQuery: userQuery,
-      error: error instanceof Error ? error.message : "Unknown error"
+      success: true,
+      query: userQuery,
+      groupedResults: groupedResults
+    };
+  } catch (error) {
+    console.error('Error in integrated workflow:', error);
+    return {
+      success: false,
+      query: userQuery,
+      error: error instanceof Error ? error.message : 'Unknown error in workflow'
     };
   }
 }
 
 // 如果直接运行此脚本，处理命令行参数
-if (require.main === module) {
-  const query = process.argv[2];
-  if (!query) {
-    console.error("请提供一个查询作为命令行参数");
-    process.exit(1);
-  }
+  if (require.main === module) {
+    const query = process.argv[2];
+    if (!query) {
+      console.error("请提供一个查询作为命令行参数");
+      process.exit(1);
+    }
   
-  console.log("开始执行搜索流程...");
-  searchExpandAndMerge(query)
+  console.log("开始执行集成工作流...");
+  runIntegratedWorkflow(query)
     .then(results => {
-      console.log("\n===== 结果摘要 =====");
-      console.log(`原始查询: "${results.originalQuery}"`);
-      
-      if (results.error) {
-        console.log(`错误: ${results.error}`);
-      } else {
-        console.log(`搜索是否成功: ${results.searchSuccess}`);
-        console.log(`收集的边界项: ${results.boundaryItemsCount}`);
-        
-        if (results.parsedResults) {
-          console.log(`\n合并后共 ${results.parsedResults.length} 个结果项`);
-        } else {
-          console.log("\n合并结果解析失败");
-        }
+      if (!results.success) {
+        console.log(`\n处理失败: ${results.error}`);
+        return;
       }
       
-      console.log("\nJSON结果已保存到outputs目录");
+      console.log(`\n===== 分组结果 =====`);
+      
+      // 输出城市级别结果
+      if (results.groupedResults.city.length > 0) {
+        console.log(`\n城市级别 (${results.groupedResults.city.length}项):`);
+        results.groupedResults.city.forEach((item: BoundaryItem, index:number) => {
+          console.log(`[${index + 1}] ${item.source.substring(0, 80)}...`);
+          console.log(`    空间范围: ${item.SpatialScope}`);
+          console.log(`    时间范围: ${item.timeRange}`);
+          console.log(`    政策建议数: ${item.policyRecommendations.length}`);
+        });
+      }
+      
+      // 输出省级结果
+      if (results.groupedResults.province.length > 0) {
+        console.log(`\n省级 (${results.groupedResults.province.length}项):`);
+        results.groupedResults.province.forEach((item: BoundaryItem, index:number) => {
+          console.log(`[${index + 1}] ${item.source.substring(0, 80)}...`);
+          console.log(`    空间范围: ${item.SpatialScope}`);
+          console.log(`    时间范围: ${item.timeRange}`);
+          console.log(`    政策建议数: ${item.policyRecommendations.length}`);
+        });
+      }
+      
+      // 输出国家级别结果
+      if (results.groupedResults.national.length > 0) {
+        console.log(`\n国家级别 (${results.groupedResults.national.length}项):`);
+        results.groupedResults.national.forEach((item: BoundaryItem, index:number) => {
+          console.log(`[${index + 1}] ${item.source.substring(0, 80)}...`);
+          console.log(`    空间范围: ${item.SpatialScope}`);
+          console.log(`    时间范围: ${item.timeRange}`);
+          console.log(`    政策建议数: ${item.policyRecommendations.length}`);
+        });
+      }
+      
+      // 输出局部焦点结果
+      if (results.groupedResults.focus.length > 0) {
+        console.log(`\n局部焦点 (${results.groupedResults.focus.length}项):`);
+        results.groupedResults.focus.forEach((item: BoundaryItem, index:number) => {
+          console.log(`[${index + 1}] ${item.source.substring(0, 80)}...`);
+          console.log(`    空间范围: ${item.SpatialScope}`);
+          console.log(`    时间范围: ${item.timeRange}`);
+          console.log(`    政策建议数: ${item.policyRecommendations.length}`);
+        });
+      }
+      
+      // 输出未分类结果
+      if (results.groupedResults.untagged.length > 0) {
+        console.log(`\n未分类 (${results.groupedResults.untagged.length}项):`);
+        results.groupedResults.untagged.forEach((item: BoundaryItem, index:number) => {
+          console.log(`[${index + 1}] ${item.source.substring(0, 80)}...`);
+          console.log(`    空间范围: ${item.SpatialScope}`);
+          console.log(`    时间范围: ${item.timeRange}`);
+          console.log(`    政策建议数: ${item.policyRecommendations.length}`);
+        });
+      }
+      
+      console.log("\n详细结果已保存到outputs目录");
     })
     .catch(error => {
       console.error("处理过程中出现错误:", error);

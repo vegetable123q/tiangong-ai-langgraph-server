@@ -6,7 +6,8 @@
     "agent": "./src/agent.ts:graph",
     "mfa_search_agent": "./src/mfa_search_agent.ts:graph",
     "merge_agent": "./src/merge_agent.ts:graph",
-    "esg_agent": "./src/esg_agent.ts:graph"
+    "esg_agent": "./src/esg_agent.ts:graph",
+    "extract_agent": "./src/extract_agent.ts:graph"
   },
   "env": ".env"
 }
