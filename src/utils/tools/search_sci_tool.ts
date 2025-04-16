@@ -20,6 +20,7 @@ class SearchSciTool extends DynamicStructuredTool {
         filter: z
           .object({
             journal: z.array(z.string()).optional().describe('Filter by journal.'),
+            doi: z.array(z.string()).optional().describe('Filter by DOI.'),
           })
           .optional()
           .describe(
@@ -60,6 +61,7 @@ class SearchSciTool extends DynamicStructuredTool {
     extK: number;
     filter?: {
       journal?: string[];
+      doi?: string[];
     };
     dateFilter?: {
       date?: {
